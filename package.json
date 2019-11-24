@@ -1,0 +1,32 @@
+{
+  "name": "nodes7comm",
+  "version": "1.0.0",
+  "description": "",
+  "main": "nodes7comm",
+  "scripts": {
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ivanrodpar/nodes7comm.git"
+  },
+  "keywords": [
+    "plc"
+  ],
+  "author": "Ivan RodPar",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Ivanrodpar/nodes7comm/issues"
+  },
+  "homepage": "https://github.com/Ivanrodpar/nodes7comm#readme",
+  "devDependencies": {
+    "@types/node": "^12.12.12",
+    "@typescript-eslint/eslint-plugin": "^2.8.0",
+    "@typescript-eslint/parser": "^2.8.0",
+    "eslint": "^6.7.0",
+    "eslint-config-prettier": "^6.7.0",
+    "eslint-plugin-prettier": "^3.1.1",
+    "prettier": "^1.19.1",
+    "typescript": "^3.7.2"
+  }
+}
