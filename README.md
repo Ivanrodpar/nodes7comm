@@ -1,19 +1,15 @@
 ## nodes7comm
 This library allows communication to S7-300/400/1200/1500 PLCs using the Siemens S7 Ethernet protocol RFC1006.
 
-This software is not affiliated with Siemens in any way, nor am I. S7-300, S7-400, S7-1200 and S7-1500 are trademarks of Siemens AG.
-
 Typescript library based entirely from [nodeS7](https://github.com/plcpeople/nodeS7). With some improvements like the following :
 
-* Promise based, `async/await` support
-* Returns javascript objects with parsed var objects
+* Promise based, `async/await` support.
+* Returns javascript objects with parsed var objects.
 
 
 ## WARNING
 
 This is ALPHA CODE and you need to be aware that WRONG VALUES could be written to WRONG LOCATIONS. Fully test everything you do.
-
-For now this library has **only been tested in S7-1200 models** 
 
 ## Usage
 

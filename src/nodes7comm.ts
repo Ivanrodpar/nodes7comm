@@ -46,6 +46,9 @@ export class S7Comm {
     private readRequestSequence: number = 0; // This increment on every read packet that are not splitter due a quantity of bytes that we can send, whit them we can identify parts
     private writeRequestSequence: number = 0; // This increment on every write packet that are not splitter due a quantity of bytes that we can send, whit them we can identify parts
 
+    public directionsTranslated: { [key: string]: string } = {};
+    private storedAdresses: Address[] = [];
+
     private translationCB: Function = this.doNothing;
     private ConnectionConfig: ConnectionConfig;
     private connectionId: string | undefined = undefined;
@@ -96,6 +99,22 @@ export class S7Comm {
 
     private doNothing(arg: string | number | boolean | (string | number | boolean)[]): string | number | boolean | (string | number | boolean)[] {
         return arg;
+    }
+
+    public setTranslationCB(variables: { [key: string]: any }): void {
+        Object.keys(variables).forEach((key): void => {
+            if (typeof variables[key] === 'undefined' || variables[key] === '') {
+                delete variables[key];
+            }
+        });
+        this.directionsTranslated = variables;
+        this.translationCB = (tag: string): any => {
+            if (this.directionsTranslated[tag]) {
+                return this.directionsTranslated[tag];
+            } else {
+                return tag;
+            }
+        };
     }
 
     private rejectAllRequestQueue(): void {
@@ -2196,6 +2215,41 @@ export class S7Comm {
         this.connectNow();
     }
 
+    public async addItems(directions: string[]): Promise<void> {
+        let addresses: Address[] = [];
+        for (let i = directions.length - 1; i >= 0; i--) {
+            const index: number = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
+                return storedAddress.name === this.translationCB(directions[i]);
+            });
+            if (index >= 0 || typeof this.translationCB(directions[i]) === 'undefined') {
+                console.log(directions[i]);
+                directions.splice(index, 1);
+            }
+        }
+        if (directions.length === 0) {
+            return;
+        }
+        try {
+            addresses = await this.stringArrayToS7AddressArray(directions, 'read');
+        } catch (err) {
+            return Promise.reject(err);
+        }
+        for (let i = 0; i < addresses.length; i++) {
+            this.storedAdresses.push(addresses[i]);
+        }
+    }
+
+    public removeItems(directions: string[]): void {
+        for (let i = 0; i < directions.length; i++) {
+            const index: number = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
+                return storedAddress.name === this.translationCB(directions[i]);
+            });
+            if (index >= 0) {
+                this.storedAdresses.splice(index, 1);
+            }
+        }
+    }
+
     public async readItems(directions: string[]): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
             this.lastError = 'Unable to read when not connected.';
@@ -2227,6 +2281,11 @@ export class S7Comm {
     public async writeItems(directions: string[], value: any[]): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
             this.lastError = 'Unable to write when not connected.';
+            this.outputLog(this.lastError, 0, this.connectionId);
+            return Promise.reject(new Error(this.lastError));
+        }
+        if (!(directions instanceof Array) || !(value instanceof Array)) {
+            this.lastError = 'Bad values given.';
             this.outputLog(this.lastError, 0, this.connectionId);
             return Promise.reject(new Error(this.lastError));
         }
