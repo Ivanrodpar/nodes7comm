@@ -1,15 +1,22 @@
 {
   "compilerOptions": {
-    "target": "es2019",
+    "target": "es5",
     "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "lib": ["es2015", "es2016"],
+    "types": ["node"],
     "declaration": true,
-    "outDir": "./lib",
-    "strict": true
+    "outDir": "lib",
+    "rootDir": "src",
+    "strict": true,
   },
+  "exclude": [
+    "lib",
+    "node_modules",
+    "src/**/*.spec.ts"
+  ],
   "include": [
     "src"
-  ],
-  "exclude": [
-    "node_modules",
   ]
 }

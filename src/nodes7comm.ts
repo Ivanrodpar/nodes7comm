@@ -27,9 +27,10 @@ export class S7Comm {
 
     private readonly globalTimeout: number = 1500; // Each packet sent to the PLC has a timeout that trigger a timeout function
 
-    private connectTimeout: number | undefined = undefined; // setTimeout function
-    private PDUTimeout: number | undefined = undefined; // setTimeout function
-    private reconnectTimer: number | undefined = undefined; // setTimeout function
+    private connectTimeout: NodeJS.Timeout = new NodeJS.Timeout; // setTimeout function
+    private PDUTimeout: NodeJS.Timeout = new NodeJS.Timeout; // setTimeout function
+    private reconnectTimer: NodeJS.Timeout = new NodeJS.Timeout; // setTimeout function
+ // setTimeout function
 
     private lastError: string | undefined; // Save the last error here
 
@@ -46,7 +47,7 @@ export class S7Comm {
     private readRequestSequence: number = 0; // This increment on every read packet that are not splitter due a quantity of bytes that we can send, whit them we can identify parts
     private writeRequestSequence: number = 0; // This increment on every write packet that are not splitter due a quantity of bytes that we can send, whit them we can identify parts
 
-    public directionsTranslated: { [key: string]: string } = {};
+    private directionsTranslated: { [key: string]: string } = {};
     private storedAdresses: Address[] = [];
 
     private translationCB: Function = this.doNothing;
@@ -134,7 +135,7 @@ export class S7Comm {
         this.requestQueue = [];
     }
 
-    private stringToS7Addr(readOrWrite: 'read' | 'write', addr: string, useraddr?: string): Address {
+    private stringToS7Addr(readOrWrite: 'read' | 'write', addr: string, useraddr: string): Address {
         let errMessage: string = '';
         const address: Address = this.Address;
         if (useraddr === '_COMMERR') {
@@ -513,11 +514,7 @@ export class S7Comm {
         }
         // Save the address from the argument for later use and reference
         address.name = addr;
-        if (useraddr === undefined) {
-            address.userName = addr;
-        } else {
-            address.userName = useraddr;
-        }
+        address.userName = useraddr;
 
         if (address.dataType === 'X') {
             address.byteLength = Math.ceil((address.bitOffset + address.arrayLength) / 8);
@@ -671,6 +668,7 @@ export class S7Comm {
                     case 'C':
                     case 'CHAR':
                         // Convert to string.
+                        //??					address.writeBuffer.writeUInt8(address.writeValue.toCharCode(), thePointer);
                         writeBuffer.writeUInt8((writeValue as string).charCodeAt(arrayIndex), thePointer);
                         break;
                     case 'S':
@@ -871,7 +869,7 @@ export class S7Comm {
         }
     }
 
-    public isWaiting(): boolean {
+    private isWaiting(): boolean {
         if (this.requestQueue.length || this.sentReadPacketArray.length || this.sentWritePacketArray.length) {
             return true;
         } else {
@@ -886,7 +884,7 @@ export class S7Comm {
             this.outputLog('Wait for 2 seconds then try again.', 0, this.connectionId);
             this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 0, this.connectionId);
             clearTimeout(this.reconnectTimer);
-            const timeHandler: TimerHandler = (): void => {
+            const timeHandler = (): void => {
                 this.outputLog('The scheduled reconnect from packetTimeout, connect type, is happening now', 0, this.connectionId);
                 this.connectionReset();
             };
@@ -898,7 +896,7 @@ export class S7Comm {
             this.outputLog('Wait for 2 seconds then try again.', 0, this.connectionId);
             this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 0, this.connectionId);
             clearTimeout(this.reconnectTimer);
-            const timeHandler: TimerHandler = (): void => {
+            const timeHandler = (): void => {
                 this.outputLog('The scheduled reconnect from packetTimeout, PDU type, is happening now', 0, this.connectionId);
                 this.connectionReset();
             };
@@ -1337,7 +1335,6 @@ export class S7Comm {
                         }
 
                         const buffer: Buffer = (this.sentReadPacketArray[foundSeqIndex].requestList[i].responseBuffer as Buffer).slice(offset, this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].byteLength + offset);
-
                         const value = this.BufferToAddressValue(this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u], buffer);
                         this.outputLog('Address ' + this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].userName + ' has value ' + value, 1, this.connectionId);
 
@@ -1566,7 +1563,7 @@ export class S7Comm {
             this.outputLog('INVALID PDU RESPONSE or CONNECTION REFUSED - DISCONNECTING', 0, this.connectionId);
             this.outputLog('TPKT Length From Header is ' + theData.readInt16BE(2) + ' and RCV buffer length is ' + theData.length + ' and COTP length is ' + theData.readUInt8(4) + ' and data[6] is ' + theData[6], 0, this.connectionId);
             this.outputLog(theData);
-            const timeHandler: TimerHandler = (): void => {
+            const timeHandler = (): void => {
                 this.connectionReset();
             };
             (this.client as Socket).destroy();
@@ -1700,7 +1697,7 @@ export class S7Comm {
         this.negotiatePDU.writeInt16BE(this.requestMaxParallel, 21);
         this.negotiatePDU.writeInt16BE(this.requestMaxPDU, 23);
 
-        const timeHandler: TimerHandler = (): void => {
+        const timeHandler = (): void => {
             this.packetTimeout('PDU');
         };
 
@@ -1725,7 +1722,7 @@ export class S7Comm {
 
         // Send an ISO-on-TCP connection request.
 
-        const timeHandler: TimerHandler = (): void => {
+        const timeHandler = (): void => {
             this.packetTimeout('ISO');
         };
         this.connectTimeout = setTimeout(timeHandler, this.globalTimeout);
@@ -1875,8 +1872,7 @@ export class S7Comm {
                 //	Then someone else wants one byte starting at byte 12.  The block length doesn't change.
                 //
                 // But if we had 40 bytes starting at byte 10 (which gives us byte 10-49) and we want byte 50, our byte length is 50-10 + 1 = 41.
-                readBlockList[thisBlock].totalbyteLength = Math.max(readBlockList[thisBlock].addresses[0].byteLength, addressesToRead[i].offset - readBlockList[thisBlock].addresses[0].offset + addressesToRead[i].byteLength);
-
+                readBlockList[thisBlock].totalbyteLength = Math.max(readBlockList[thisBlock].totalbyteLength, addressesToRead[i].offset - readBlockList[thisBlock].addresses[0].offset + addressesToRead[i].byteLength);
                 // Point the buffers (byte and quality) to a sliced version of the optimized block.  This is by reference (same area of memory)
                 readBlockList[thisBlock].isOptimized = true;
                 readBlockList[thisBlock].addresses.push(addressesToRead[i]);
@@ -1995,7 +1991,7 @@ export class S7Comm {
                 this.S7AddrToBuffer(readPacketArray[i].requestList[j].addresses[0], readPacketArray[i].requestList[j].totalbyteLength, readPacketArray[i].requestList[j].byteLengthWithFill, readPacketArray[i].requestList[j].offset, false).copy(this.readReq, 19 + j * 12);
             }
             if (this.isoConnectionState === 's7comm') {
-                const timeHandler: TimerHandler = (): void => {
+                const timeHandler = (): void => {
                     this.packetTimeout('read', readPacketArray[i].seqNum);
                 };
                 this.sentReadPacketArray.push({
@@ -2011,7 +2007,7 @@ export class S7Comm {
                 this.parallelJobsNow += 1;
                 (this.client as Socket).write(this.readReq.slice(0, 19 + readPacketArray[i].requestList.length * 12));
             } else {
-                const timeHandler: TimerHandler = (): void => {
+                const timeHandler = (): void => {
                     this.packetTimeout('read', readPacketArray[i].seqNum);
                 };
                 this.sentReadPacketArray.push({
@@ -2178,7 +2174,7 @@ export class S7Comm {
 
             if (this.isoConnectionState === 's7comm') {
                 // this.outputLog('writing' + (19 + dataBufferPointer + writePacketArray[i].requestList.length * 12));
-                const timeHandler: TimerHandler = (): void => {
+                const timeHandler = (): void => {
                     this.packetTimeout('write', writePacketArray[i].seqNum);
                 };
                 this.sentWritePacketArray.push({
@@ -2194,7 +2190,7 @@ export class S7Comm {
                 (this.client as Socket).write(this.writeReq.slice(0, 19 + dataBufferPointer + writePacketArray[i].requestList.length * 12)); // was 31
                 this.outputLog('Sending Write Packet With Sequence Number ' + writePacketArray[i].seqNum, 0, this.connectionId);
             } else {
-                const timeHandler: TimerHandler = (): void => {
+                const timeHandler = (): void => {
                     this.packetTimeout('write', writePacketArray[i].seqNum);
                 };
                 this.sentWritePacketArray.push({
@@ -2256,7 +2252,49 @@ export class S7Comm {
             this.outputLog(this.lastError, 0, this.connectionId);
             return Promise.reject(new Error(this.lastError));
         }
-        const addresses: Address[] = await this.stringArrayToS7AddressArray(directions, 'read');
+        if (!(directions instanceof Array)) {
+            this.lastError = 'Bad values given.';
+            this.outputLog(this.lastError, 0, this.connectionId);
+            return Promise.reject(new Error(this.lastError));
+        }
+        let addresses: Address[] = [];
+        try {
+            addresses = await this.stringArrayToS7AddressArray(directions, 'read');
+        } catch (err) {
+            return Promise.reject(err);
+        }
+        const promises: Promise<any>[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+        addresses.forEach((address): void => {
+            const promise = new Promise((resolve, reject): void => {
+                address.promiseResolve = resolve;
+                address.promiseReject = reject;
+            });
+            promises.push(promise);
+        });
+
+        const preparedReadRequest: S7PreparedReadRequest[] = this.prepareReadPacket(addresses);
+        this.sendReadPacket(preparedReadRequest); // Note this sends the first few read packets depending on parallel connection restrictions.
+
+        return Promise.all(promises)
+            .then((values: any): void => {
+                return Object.assign({}, ...values);
+            })
+            .catch((err): void => {
+                throw new Error(err);
+            });
+    }
+
+    public async readAllItems(): Promise<any> {
+        if (this.isoConnectionState !== 's7comm') {
+            this.lastError = 'Unable to read when not connected.';
+            this.outputLog(this.lastError, 0, this.connectionId);
+            return Promise.reject(new Error(this.lastError));
+        }
+        if (this.storedAdresses.length === 0) {
+            return Promise.resolve([]);
+        }
+        const addresses: Address[] = [...this.storedAdresses]; // We need a copy, not a reference
+
         const promises: Promise<any>[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
         addresses.forEach((address): void => {
             const promise = new Promise((resolve, reject): void => {
@@ -2360,9 +2398,9 @@ export class S7Comm {
     }
 }
 
-export type PacketTimeout = 'ISO' | 'PDU' | 'read' | 'write';
+type PacketTimeout = 'ISO' | 'PDU' | 'read' | 'write';
 
-export type ConnectionState = 'disconnected' | 'tcp' | 'isoOnTcp' | 's7comm';
+type ConnectionState = 'disconnected' | 'tcp' | 'isoOnTcp' | 's7comm';
 
 export interface ConnectionConfig {
     port: number;
@@ -2377,40 +2415,40 @@ export interface ConnectionConfig {
     connectionName?: string;
 }
 
-export interface SendReadRequest {
+interface SendReadRequest {
     seqNum: number; // Made-up sequence number to watch for.
     requestList: ReadBlock[]; // This will be assigned the object that details what was in the request.
     reqTime: bigint;
     responseBuffer: Buffer;
     sent: boolean; // Have we sent the packet yet?
     rcvd: boolean; // Are we waiting on a reply?
-    timeout: number; // The timeout for use with clearTimeout()
+    timeout: NodeJS.Timeout; // The timeout for use with clearTimeout()
     readRequestSequence: number; // If a request are splitter in 2 or more parts
 }
 
-export interface SendWriteRequest {
+interface SendWriteRequest {
     seqNum: number; // Made-up sequence number to watch for.
     requestList: WriteBlock[]; // This will be assigned the object that details what was in the request.
     reqTime: bigint;
     sent: boolean; // Have we sent the packet yet?
     rcvd: boolean; // Are we waiting on a reply?
-    timeout: number; // The timeout for use with clearTimeout()
+    timeout: NodeJS.Timeout; // The timeout for use with clearTimeout()
     writeRequestSequence: number; // Number of parts that the request are splitter in 2 or more parts
 }
 
-export interface S7PreparedWriteRequest {
+interface S7PreparedWriteRequest {
     seqNum: number; // Made-up sequence number to watch for.
     writeRequestSequence: number;
     requestList: WriteBlock[]; // This will be assigned the object that details what was in the request.
 }
 
-export interface S7PreparedReadRequest {
+interface S7PreparedReadRequest {
     seqNum: number; // Made-up sequence number to watch for.
     readRequestSequence: number;
     requestList: ReadBlock[]; // This will be assigned the object that details what was in the request.
 }
 
-export interface S7ItemWrite {
+interface S7ItemWrite {
     address: Address;
     writeResponse: number;
     writeQuality: string[] | string;
@@ -2423,13 +2461,13 @@ export interface S7ItemWrite {
     resultReference: undefined;
 }
 
-export interface ReadBlock extends OptimizableReadBlocks {
+interface ReadBlock extends OptimizableReadBlocks {
     parts: number;
     readRequestSequence: number;
     readValue?: Buffer;
     responseBuffer?: Buffer;
 }
-export interface OptimizableReadBlocks {
+interface OptimizableReadBlocks {
     totalbyteLength: number;
     offset: number;
     byteLengthWithFill: number;
@@ -2437,19 +2475,19 @@ export interface OptimizableReadBlocks {
     isOptimized: boolean;
 }
 
-export interface WriteBlock {
+interface WriteBlock {
     parts: number;
     itemReference: S7ItemWrite;
     isOptimized: boolean;
     writeRequestSequence: number;
 }
 
-export interface RequestQueue {
+interface RequestQueue {
     request: S7PreparedReadRequest | S7PreparedWriteRequest;
     action: 'read' | 'write';
 }
 
-export interface Address {
+interface Address {
     name: string; // s7 address
     userName: string; // original address
     Type: string; // 'DB' | 'I' | 'PI' | 'Q' | 'PQ' | 'M' | 'C' | 'T'

@@ -1,11 +1,14 @@
 {
   "name": "nodes7comm",
   "version": "1.0.0",
-  "description": "",
-  "main": "nodes7comm",
+  "description": "Library to establish a connection with S7 PLC's",
+  "main": "lib/index.js",
   "scripts": {
     "build": "tsc"
   },
+  "files": [
+    "lib"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Ivanrodpar/nodes7comm.git"
