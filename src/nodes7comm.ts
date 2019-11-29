@@ -27,9 +27,9 @@ export class S7Comm {
 
     private readonly globalTimeout: number = 1500; // Each packet sent to the PLC has a timeout that trigger a timeout function
 
-    private connectTimeout: NodeJS.Timeout = new NodeJS.Timeout; // setTimeout function
-    private PDUTimeout: NodeJS.Timeout = new NodeJS.Timeout; // setTimeout function
-    private reconnectTimer: NodeJS.Timeout = new NodeJS.Timeout; // setTimeout function
+    private connectTimeout: NodeJS.Timeout | undefined; // setTimeout function
+    private PDUTimeout: NodeJS.Timeout | undefined; // setTimeout function
+    private reconnectTimer: NodeJS.Timeout | undefined; // setTimeout function
  // setTimeout function
 
     private lastError: string | undefined; // Save the last error here
@@ -47,7 +47,7 @@ export class S7Comm {
     private readRequestSequence: number = 0; // This increment on every read packet that are not splitter due a quantity of bytes that we can send, whit them we can identify parts
     private writeRequestSequence: number = 0; // This increment on every write packet that are not splitter due a quantity of bytes that we can send, whit them we can identify parts
 
-    private directionsTranslated: { [key: string]: string } = {};
+    public directionsTranslated: { [key: string]: string } = {};
     private storedAdresses: Address[] = [];
 
     private translationCB: Function = this.doNothing;
@@ -57,6 +57,7 @@ export class S7Comm {
     private connectCBIssued: boolean = false;
 
     public constructor(ConnectionConfig: ConnectionConfig) {
+        this.connectTimeout
         if (typeof ConnectionConfig.silentMode !== 'undefined') {
             this.silentMode = ConnectionConfig.silentMode;
         }
@@ -883,7 +884,7 @@ export class S7Comm {
             this.outputLog('TIMED OUT connecting to the PLC - Disconnecting', 0, this.connectionId);
             this.outputLog('Wait for 2 seconds then try again.', 0, this.connectionId);
             this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 0, this.connectionId);
-            clearTimeout(this.reconnectTimer);
+            clearTimeout(this.reconnectTimer as NodeJS.Timeout);
             const timeHandler = (): void => {
                 this.outputLog('The scheduled reconnect from packetTimeout, connect type, is happening now', 0, this.connectionId);
                 this.connectionReset();
@@ -895,7 +896,7 @@ export class S7Comm {
             this.outputLog('TIMED OUT waiting for PDU reply packet from PLC - Disconnecting');
             this.outputLog('Wait for 2 seconds then try again.', 0, this.connectionId);
             this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 0, this.connectionId);
-            clearTimeout(this.reconnectTimer);
+            clearTimeout(this.reconnectTimer as NodeJS.Timeout);
             const timeHandler = (): void => {
                 this.outputLog('The scheduled reconnect from packetTimeout, PDU type, is happening now', 0, this.connectionId);
                 this.connectionReset();
@@ -959,8 +960,8 @@ export class S7Comm {
                 this.outputLog('TCP socket error following connection cleanup');
             });
         }
-        clearTimeout(this.connectTimeout);
-        clearTimeout(this.PDUTimeout);
+        clearTimeout(this.connectTimeout as NodeJS.Timeout);
+        clearTimeout(this.PDUTimeout as NodeJS.Timeout);
     }
 
     private findReadIndexOfSeqNum(seqNum: number): number | undefined {
@@ -1503,7 +1504,7 @@ export class S7Comm {
     private onPDUReply(theData: Buffer): void {
         (this.client as Socket).removeAllListeners('error');
 
-        clearTimeout(this.PDUTimeout);
+        clearTimeout(this.PDUTimeout as NodeJS.Timeout);
 
         const data = this.checkRfcData(theData);
         if (data === 'fastACK') {
@@ -1567,7 +1568,7 @@ export class S7Comm {
                 this.connectionReset();
             };
             (this.client as Socket).destroy();
-            clearTimeout(this.reconnectTimer);
+            clearTimeout(this.reconnectTimer as NodeJS.Timeout);
             this.reconnectTimer = setTimeout(timeHandler, 2000);
         }
     }
@@ -1672,7 +1673,7 @@ export class S7Comm {
     private onISOConnectReply(data: Buffer): void {
         (this.client as Socket).removeAllListeners('error');
 
-        clearTimeout(this.connectTimeout);
+        clearTimeout(this.connectTimeout as NodeJS.Timeout);
 
         // ignore if we're not expecting it - prevents write after end exception as of #80
         if (this.isoConnectionState != 'tcp') {
@@ -1767,7 +1768,7 @@ export class S7Comm {
 
     private connectNow(): void {
         // prevents any reconnect timer to fire this again
-        clearTimeout(this.reconnectTimer);
+        clearTimeout(this.reconnectTimer as NodeJS.Timeout);
 
         // Don't re-trigger.
         if (this.isoConnectionState !== 'disconnected') {
