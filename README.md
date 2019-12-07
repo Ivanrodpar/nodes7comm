@@ -4,14 +4,14 @@
 
 This library allows communication to S7-300/400/1200/1500 PLCs using the Siemens S7 Ethernet protocol RFC1006.
 
-Typescript library based entirely from [nodeS7](https://github.com/plcpeople/nodeS7). With some improvements like the following :
+This library is based entirely from [nodeS7](https://github.com/plcpeople/nodeS7). With some improvements like the following :
 
 * Promise based, `async/await` support.
-* Returns javascript objects with parsed var objects.
+* Can make concurrent request.
 
-## WARNING
+## Atention
 
-This is ALPHA CODE and you need to be aware that WRONG VALUES could be written to WRONG LOCATIONS. Fully test everything you do.
+You need to be aware that WRONG VALUES could be written to WRONG LOCATIONS. Fully test everything you do.
 
 ## Usage
 
@@ -21,10 +21,17 @@ npm install nodes7comm
 ```ts
 const { S7Comm } = require('nodes7comm');
 
-// constructor
 let s7comm = new S7Comm(<ConnectionConfig>);
 s7comm.initiateConnection(); // For now this functions is the only one that not return a promise
 ```
+## Data Types
+
+| Type | Prefix |  Examples  |
+| ------------ | ------------ | ------------ |
+|  Boolean |  X or nothing | DB.1,X3.0 Q0.2 M23.0 |
+|  Int |  INT  |  MINT30 DB2,INT124 |
+
+
 
 ## Interfaces
  - [ConnectionConfig](#connectionConfig)
