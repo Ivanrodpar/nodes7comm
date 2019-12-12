@@ -30,7 +30,6 @@ export class S7Comm {
     private connectTimeout: NodeJS.Timeout | undefined; // setTimeout function
     private PDUTimeout: NodeJS.Timeout | undefined; // setTimeout function
     private reconnectTimer: NodeJS.Timeout | undefined; // setTimeout function
- // setTimeout function
 
     private lastError: string | undefined; // Save the last error here
 
@@ -57,7 +56,6 @@ export class S7Comm {
     private connectCBIssued: boolean = false;
 
     public constructor(ConnectionConfig: ConnectionConfig) {
-        this.connectTimeout
         if (typeof ConnectionConfig.silentMode !== 'undefined') {
             this.silentMode = ConnectionConfig.silentMode;
         }
@@ -1331,8 +1329,6 @@ export class S7Comm {
                         const currentOffset = this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].offset;
                         if (pastOffset !== currentOffset) {
                             offset += this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].offset - this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u - 1].offset;
-                        } else {
-                            offset = offset;
                         }
 
                         const buffer: Buffer = (this.sentReadPacketArray[foundSeqIndex].requestList[i].responseBuffer as Buffer).slice(offset, this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].byteLength + offset);
