@@ -1,6 +1,6 @@
 {
   "name": "nodes7comm",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Library to establish a connection with S7 PLC's",
   "main": "lib/index.js",
   "scripts": {
