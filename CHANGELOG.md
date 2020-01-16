@@ -1,3 +1,7 @@
+### v1.0.3
+
+- Update docs.
+
 ### v1.0.1
 
 - We can read a list of stored Items.
