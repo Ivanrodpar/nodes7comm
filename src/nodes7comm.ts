@@ -118,8 +118,8 @@ export class S7Comm {
     }
 
     private rejectAllRequestQueue(): void {
-        this.outputLog('We detect a connection error, we are rejecting all request');
         this.lastError = 'We detect a connection error, we are rejecting all request';
+        this.outputLog(this.lastError);
         for (let i = 0; i < this.requestQueue.length; i++) {
             if (this.requestQueue[i].action === 'read') {
                 const req = this.requestQueue[i].request as SendReadRequest;
@@ -135,18 +135,12 @@ export class S7Comm {
     }
 
     private stringToS7Addr(readOrWrite: 'read' | 'write', addr: string, useraddr: string): Address {
-        let errMessage: string = '';
         const address: Address = this.Address;
-        if (useraddr === '_COMMERR') {
-            address.valid = false;
-            return address;
-        } // Special-case for communication error status - this variable returns true when there is a communications error
 
         const splitString = addr.split(',');
         if (splitString.length === 0 || splitString.length > 2) {
-            errMessage = 'Error - String Couldnt Split Properly.';
-            this.lastError = errMessage;
-            this.outputLog(errMessage);
+            this.lastError = 'String Couldnt Split Properly';
+            this.outputLog(this.lastError);
             address.valid = false;
             return address;
         }
@@ -157,22 +151,21 @@ export class S7Comm {
             const splitString2 = splitString[1].split('.');
             address.dataType = splitString2[0].replace(/[0-9]/gi, '').toUpperCase(); // Clear the numbers
             if (address.dataType === 'X' && splitString2.length === 3) {
-                address.arrayLength = parseInt(splitString2[2], 10);
+                address.arrayLength = parseInt(splitString2[2], 10); // Array of bits
+            } else if (address.dataType !== 'X' && splitString2.length === 2) {
+                address.arrayLength = parseInt(splitString2[1], 10); // Bit
             } else if ((address.dataType === 'S' || address.dataType === 'STRING') && splitString2.length === 3) {
                 address.dataTypeLength = parseInt(splitString2[1], 10) + 2; // With strings, add 2 to the length due to S7 header
                 address.arrayLength = parseInt(splitString2[2], 10); // For strings, array length is now the number of strings
             } else if ((address.dataType === 'S' || address.dataType === 'STRING') && splitString2.length === 2) {
                 address.dataTypeLength = parseInt(splitString2[1], 10) + 2; // With strings, add 2 to the length due to S7 header
                 address.arrayLength = 1;
-            } else if (address.dataType !== 'X' && splitString2.length === 2) {
-                address.arrayLength = parseInt(splitString2[1], 10);
             } else {
                 address.arrayLength = 1;
             }
             if (address.arrayLength <= 0) {
-                errMessage = 'Zero length arrays not allowed, returning undefined';
-                this.lastError = errMessage;
-                this.outputLog(errMessage);
+                this.lastError = 'Zero length arrays not allowed, returning undefined';
+                this.outputLog(this.lastError);
                 address.valid = false;
                 return address;
             }
@@ -182,16 +175,14 @@ export class S7Comm {
 
             // Get the data block byte offset from the second part, eliminating characters.
             // Note that at this point, we may miss some info, like a "T" at the end indicating TIME data type or DATE data type or DT data type.  We ignore these.
-            // This is on the TODO list.
             address.offset = parseInt(splitString2[0].replace(/[A-z]/gi, ''), 10); // Get rid of characters
 
             // Get the bit offset
             if (splitString2.length > 1 && address.dataType === 'X') {
                 address.bitOffset = parseInt(splitString2[1], 10);
                 if (isNaN(address.bitOffset) || address.bitOffset < 0 || address.bitOffset > 7) {
-                    errMessage = 'Invalid bit offset specified for address ' + addr;
-                    this.lastError = errMessage;
-                    this.outputLog(errMessage);
+                    this.lastError = 'Invalid bit offset specified for address ' + addr;
+                    this.outputLog(this.lastError);
                     address.valid = false;
                     return address;
                 }
@@ -391,9 +382,8 @@ export class S7Comm {
                     break;
 
                 default:
-                    errMessage = 'Failed to find a match for ' + splitString2[0];
-                    this.lastError = errMessage;
-                    this.outputLog(errMessage);
+                    this.lastError = 'Failed to find a match for ' + splitString2[0];
+                    this.outputLog(this.lastError);
                     address.valid = false;
                     return address;
             }
@@ -419,9 +409,8 @@ export class S7Comm {
         }
 
         if (isNaN(address.offset) || address.offset < 0) {
-            errMessage = 'Invalid byte offset specified for address ' + addr;
-            this.lastError = errMessage;
-            this.outputLog(errMessage);
+            this.lastError = 'Invalid byte offset specified for address ' + addr;
+            this.outputLog(this.lastError);
             address.valid = false;
             return address;
         }
@@ -463,9 +452,8 @@ export class S7Comm {
                 // For strings, arrayLength and dtypelen were assigned during parsing.
                 break;
             default:
-                errMessage = 'Unknown data type ' + address.dataType;
-                this.lastError = errMessage;
-                this.outputLog(errMessage);
+                this.lastError = 'Unknown data type ' + address.dataType;
+                this.outputLog(this.lastError);
                 address.valid = false;
                 return address;
         }
@@ -501,9 +489,8 @@ export class S7Comm {
                 address.transportCode = 0x09;
                 break;
             default:
-                errMessage = 'Unknown memory area entered - ' + address.dataType;
-                this.lastError = errMessage;
-                this.outputLog(errMessage);
+                this.lastError = 'Unknown memory area ' + address.dataType;
+                this.outputLog(this.lastError);
                 address.valid = false;
                 return address;
         }
@@ -519,9 +506,8 @@ export class S7Comm {
             address.byteLength = Math.ceil((address.bitOffset + address.arrayLength) / 8);
         } else {
             if (address.arrayLength === 0) {
-                errMessage = 'Array length cannot be 0: ' + address.name;
-                this.lastError = errMessage;
-                this.outputLog(errMessage);
+                this.lastError = 'Array length cannot be 0: ' + address.name;
+                this.outputLog(this.lastError);
                 address.valid = false;
                 return address;
             }
@@ -541,13 +527,13 @@ export class S7Comm {
         return new Promise<Address[]>((resolve, reject): void => {
             this.outputLog('Adding ' + items, 0, this.connectionId);
             const addresses: Address[] = [];
-            if (typeof items === 'string' && items !== '_COMMERR') {
+            if (typeof items === 'string') {
                 let address = this.Address;
                 address = this.stringToS7Addr(operation, this.translationCB(items), items);
                 addresses.push(address);
             } else if (Array.isArray(items)) {
                 for (let i = 0; i < items.length; i++) {
-                    if (typeof items[i] === 'string' && items[i] !== '_COMMERR') {
+                    if (typeof items[i] === 'string') {
                         let address = this.Address;
                         address = this.stringToS7Addr(operation, this.translationCB(items[i]), items[i]);
                         addresses.push(address);
