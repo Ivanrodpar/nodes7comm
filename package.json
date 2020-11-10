@@ -1,6 +1,6 @@
 {
   "name": "nodes7comm",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Library to establish a connection with S7 PLC's",
   "main": "lib/index.js",
   "scripts": {
@@ -23,13 +23,13 @@
   },
   "homepage": "https://github.com/Ivanrodpar/nodes7comm#readme",
   "devDependencies": {
-    "@types/node": "^12.12.12",
-    "@typescript-eslint/eslint-plugin": "^2.8.0",
-    "@typescript-eslint/parser": "^2.8.0",
-    "eslint": "^6.7.0",
-    "eslint-config-prettier": "^6.7.0",
-    "eslint-plugin-prettier": "^3.1.1",
+    "@types/node": "^12.19.4",
+    "@typescript-eslint/eslint-plugin": "^2.34.0",
+    "@typescript-eslint/parser": "^2.34.0",
+    "eslint": "^6.8.0",
+    "eslint-config-prettier": "^6.15.0",
+    "eslint-plugin-prettier": "^3.1.4",
     "prettier": "^1.19.1",
-    "typescript": "^3.7.2"
+    "typescript": "^3.9.7"
   }
 }
