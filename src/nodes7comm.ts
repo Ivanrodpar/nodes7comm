@@ -1,6 +1,10 @@
 import { connect, Socket } from 'net';
 import { format } from 'util';
 
+import { ConnectionState, PacketTimeout, ConnectionConfig } from './types/connections.types';
+import { RequestQueue, SendReadRequest, SendWriteRequest, S7ItemWrite, ReadBlock, S7PreparedReadRequest, S7PreparedWriteRequest, OptimizableReadBlocks, WriteBlock } from './types/request.types';
+import { Address } from './types/address.types';
+
 export class S7Comm {
     private silentMode: boolean = false; // If true, hidde all logs
     private effectiveDebugLevel: number = 0; // Only show logs equal or lower that this number
@@ -2379,112 +2383,4 @@ export class S7Comm {
             resultReference: undefined,
         };
     }
-}
-
-type PacketTimeout = 'ISO' | 'PDU' | 'read' | 'write';
-
-type ConnectionState = 'disconnected' | 'tcp' | 'isoOnTcp' | 's7comm';
-
-export interface ConnectionConfig {
-    port: number;
-    host: string;
-    rack?: number;
-    slot?: number;
-    timeout?: number;
-    silentMode?: boolean;
-    localTSAP?: number;
-    remoteTSAP?: number;
-    callback?: Function;
-    connectionName?: string;
-}
-
-interface SendReadRequest {
-    seqNum: number; // Made-up sequence number to watch for.
-    requestList: ReadBlock[]; // This will be assigned the object that details what was in the request.
-    reqTime: bigint;
-    responseBuffer: Buffer;
-    sent: boolean; // Have we sent the packet yet?
-    rcvd: boolean; // Are we waiting on a reply?
-    timeout: NodeJS.Timeout; // The timeout for use with clearTimeout()
-    readRequestSequence: number; // If a request are splitter in 2 or more parts
-}
-
-interface SendWriteRequest {
-    seqNum: number; // Made-up sequence number to watch for.
-    requestList: WriteBlock[]; // This will be assigned the object that details what was in the request.
-    reqTime: bigint;
-    sent: boolean; // Have we sent the packet yet?
-    rcvd: boolean; // Are we waiting on a reply?
-    timeout: NodeJS.Timeout; // The timeout for use with clearTimeout()
-    writeRequestSequence: number; // Number of parts that the request are splitter in 2 or more parts
-}
-
-interface S7PreparedWriteRequest {
-    seqNum: number; // Made-up sequence number to watch for.
-    writeRequestSequence: number;
-    requestList: WriteBlock[]; // This will be assigned the object that details what was in the request.
-}
-
-interface S7PreparedReadRequest {
-    seqNum: number; // Made-up sequence number to watch for.
-    readRequestSequence: number;
-    requestList: ReadBlock[]; // This will be assigned the object that details what was in the request.
-}
-
-interface S7ItemWrite {
-    address: Address;
-    writeResponse: number;
-    writeQuality: string[] | string;
-    writeBuffer: Buffer;
-    validResponseBuffer: boolean;
-    quality: string[] | string;
-    writeValue: any;
-    valid: boolean;
-    errCode: string;
-    resultReference: undefined;
-}
-
-interface ReadBlock extends OptimizableReadBlocks {
-    parts: number;
-    readRequestSequence: number;
-    readValue?: Buffer;
-    responseBuffer?: Buffer;
-}
-interface OptimizableReadBlocks {
-    totalbyteLength: number;
-    offset: number;
-    byteLengthWithFill: number;
-    addresses: Address[];
-    isOptimized: boolean;
-}
-
-interface WriteBlock {
-    parts: number;
-    itemReference: S7ItemWrite;
-    isOptimized: boolean;
-    writeRequestSequence: number;
-}
-
-interface RequestQueue {
-    request: S7PreparedReadRequest | S7PreparedWriteRequest;
-    action: 'read' | 'write';
-}
-
-interface Address {
-    name: string; // s7 address
-    userName: string; // original address
-    Type: string; // 'DB' | 'I' | 'PI' | 'Q' | 'PQ' | 'M' | 'C' | 'T'
-    dataType: string; // type of address (INT, REAL, X, STRING...)
-    dbNumber: number; // datablock number DB1,REAL8 => 1
-    bitOffset: number; // bitoffset of address DB1,X13.2 => 2 only works with types X
-    offset: number; // offset of data DB1,REAL8 => 8
-    arrayLength: number; // values to read in sequence MX2.2.3 => 3, default 1
-    dataTypeLength: number; // bytes requiered for datatype INT => 2, REAL => 4, X => 1
-    areaS7Code: 0x84 | 0x81 | 0x82 | 0x83 | 0x80 | 0x1c | 0x1d; // s7 areas 0x84, 0x81, 0x82, 0x83, 0x80, 0x1c, 0x1d
-    byteLength: number; // total bytes
-    byteLengthWithFill: number; // byte with fill % 2
-    transportCode: 0x04 | 0x09 | 0x03;
-    valid: boolean; // If the stored adrress is valid
-    promiseResolve?: Function; // We store a resolve function for each address to read or write
-    promiseReject?: Function; // We store a reject function for each address to read or write
 }
