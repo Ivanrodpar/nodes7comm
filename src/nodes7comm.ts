@@ -1,6 +1,10 @@
 import { connect, Socket } from 'net';
 import { format } from 'util';
 
+import { ConnectionState, PacketTimeout, ConnectionConfig } from './types/connections.types';
+import { RequestQueue, SendReadRequest, SendWriteRequest, S7ItemWrite, ReadBlock, S7PreparedReadRequest, S7PreparedWriteRequest, OptimizableReadBlocks, WriteBlock } from './types/request.types';
+import { Address } from './types/address.types';
+
 export class S7Comm {
     private silentMode: boolean = false; // If true, hidde all logs
     private effectiveDebugLevel: number = 0; // Only show logs equal or lower that this number
@@ -118,8 +122,8 @@ export class S7Comm {
     }
 
     private rejectAllRequestQueue(): void {
-        this.outputLog('We detect a connection error, we are rejecting all request');
         this.lastError = 'We detect a connection error, we are rejecting all request';
+        this.outputLog(this.lastError);
         for (let i = 0; i < this.requestQueue.length; i++) {
             if (this.requestQueue[i].action === 'read') {
                 const req = this.requestQueue[i].request as SendReadRequest;
@@ -135,18 +139,12 @@ export class S7Comm {
     }
 
     private stringToS7Addr(readOrWrite: 'read' | 'write', addr: string, useraddr: string): Address {
-        let errMessage: string = '';
         const address: Address = this.Address;
-        if (useraddr === '_COMMERR') {
-            address.valid = false;
-            return address;
-        } // Special-case for communication error status - this variable returns true when there is a communications error
 
         const splitString = addr.split(',');
         if (splitString.length === 0 || splitString.length > 2) {
-            errMessage = 'Error - String Couldnt Split Properly.';
-            this.lastError = errMessage;
-            this.outputLog(errMessage);
+            this.lastError = 'String Couldnt Split Properly';
+            this.outputLog(this.lastError);
             address.valid = false;
             return address;
         }
@@ -157,22 +155,21 @@ export class S7Comm {
             const splitString2 = splitString[1].split('.');
             address.dataType = splitString2[0].replace(/[0-9]/gi, '').toUpperCase(); // Clear the numbers
             if (address.dataType === 'X' && splitString2.length === 3) {
-                address.arrayLength = parseInt(splitString2[2], 10);
+                address.arrayLength = parseInt(splitString2[2], 10); // Array of bits
+            } else if (address.dataType !== 'X' && splitString2.length === 2) {
+                address.arrayLength = parseInt(splitString2[1], 10); // Bit
             } else if ((address.dataType === 'S' || address.dataType === 'STRING') && splitString2.length === 3) {
                 address.dataTypeLength = parseInt(splitString2[1], 10) + 2; // With strings, add 2 to the length due to S7 header
                 address.arrayLength = parseInt(splitString2[2], 10); // For strings, array length is now the number of strings
             } else if ((address.dataType === 'S' || address.dataType === 'STRING') && splitString2.length === 2) {
                 address.dataTypeLength = parseInt(splitString2[1], 10) + 2; // With strings, add 2 to the length due to S7 header
                 address.arrayLength = 1;
-            } else if (address.dataType !== 'X' && splitString2.length === 2) {
-                address.arrayLength = parseInt(splitString2[1], 10);
             } else {
                 address.arrayLength = 1;
             }
             if (address.arrayLength <= 0) {
-                errMessage = 'Zero length arrays not allowed, returning undefined';
-                this.lastError = errMessage;
-                this.outputLog(errMessage);
+                this.lastError = 'Zero length arrays not allowed, returning undefined';
+                this.outputLog(this.lastError);
                 address.valid = false;
                 return address;
             }
@@ -182,16 +179,14 @@ export class S7Comm {
 
             // Get the data block byte offset from the second part, eliminating characters.
             // Note that at this point, we may miss some info, like a "T" at the end indicating TIME data type or DATE data type or DT data type.  We ignore these.
-            // This is on the TODO list.
             address.offset = parseInt(splitString2[0].replace(/[A-z]/gi, ''), 10); // Get rid of characters
 
             // Get the bit offset
             if (splitString2.length > 1 && address.dataType === 'X') {
                 address.bitOffset = parseInt(splitString2[1], 10);
                 if (isNaN(address.bitOffset) || address.bitOffset < 0 || address.bitOffset > 7) {
-                    errMessage = 'Invalid bit offset specified for address ' + addr;
-                    this.lastError = errMessage;
-                    this.outputLog(errMessage);
+                    this.lastError = 'Invalid bit offset specified for address ' + addr;
+                    this.outputLog(this.lastError);
                     address.valid = false;
                     return address;
                 }
@@ -391,9 +386,8 @@ export class S7Comm {
                     break;
 
                 default:
-                    errMessage = 'Failed to find a match for ' + splitString2[0];
-                    this.lastError = errMessage;
-                    this.outputLog(errMessage);
+                    this.lastError = 'Failed to find a match for ' + splitString2[0];
+                    this.outputLog(this.lastError);
                     address.valid = false;
                     return address;
             }
@@ -419,9 +413,8 @@ export class S7Comm {
         }
 
         if (isNaN(address.offset) || address.offset < 0) {
-            errMessage = 'Invalid byte offset specified for address ' + addr;
-            this.lastError = errMessage;
-            this.outputLog(errMessage);
+            this.lastError = 'Invalid byte offset specified for address ' + addr;
+            this.outputLog(this.lastError);
             address.valid = false;
             return address;
         }
@@ -463,9 +456,8 @@ export class S7Comm {
                 // For strings, arrayLength and dtypelen were assigned during parsing.
                 break;
             default:
-                errMessage = 'Unknown data type ' + address.dataType;
-                this.lastError = errMessage;
-                this.outputLog(errMessage);
+                this.lastError = 'Unknown data type ' + address.dataType;
+                this.outputLog(this.lastError);
                 address.valid = false;
                 return address;
         }
@@ -501,9 +493,8 @@ export class S7Comm {
                 address.transportCode = 0x09;
                 break;
             default:
-                errMessage = 'Unknown memory area entered - ' + address.dataType;
-                this.lastError = errMessage;
-                this.outputLog(errMessage);
+                this.lastError = 'Unknown memory area ' + address.dataType;
+                this.outputLog(this.lastError);
                 address.valid = false;
                 return address;
         }
@@ -519,9 +510,8 @@ export class S7Comm {
             address.byteLength = Math.ceil((address.bitOffset + address.arrayLength) / 8);
         } else {
             if (address.arrayLength === 0) {
-                errMessage = 'Array length cannot be 0: ' + address.name;
-                this.lastError = errMessage;
-                this.outputLog(errMessage);
+                this.lastError = 'Array length cannot be 0: ' + address.name;
+                this.outputLog(this.lastError);
                 address.valid = false;
                 return address;
             }
@@ -541,13 +531,13 @@ export class S7Comm {
         return new Promise<Address[]>((resolve, reject): void => {
             this.outputLog('Adding ' + items, 0, this.connectionId);
             const addresses: Address[] = [];
-            if (typeof items === 'string' && items !== '_COMMERR') {
+            if (typeof items === 'string') {
                 let address = this.Address;
                 address = this.stringToS7Addr(operation, this.translationCB(items), items);
                 addresses.push(address);
             } else if (Array.isArray(items)) {
                 for (let i = 0; i < items.length; i++) {
-                    if (typeof items[i] === 'string' && items[i] !== '_COMMERR') {
+                    if (typeof items[i] === 'string') {
                         let address = this.Address;
                         address = this.stringToS7Addr(operation, this.translationCB(items[i]), items[i]);
                         addresses.push(address);
@@ -2393,112 +2383,4 @@ export class S7Comm {
             resultReference: undefined,
         };
     }
-}
-
-type PacketTimeout = 'ISO' | 'PDU' | 'read' | 'write';
-
-type ConnectionState = 'disconnected' | 'tcp' | 'isoOnTcp' | 's7comm';
-
-export interface ConnectionConfig {
-    port: number;
-    host: string;
-    rack?: number;
-    slot?: number;
-    timeout?: number;
-    silentMode?: boolean;
-    localTSAP?: number;
-    remoteTSAP?: number;
-    callback?: Function;
-    connectionName?: string;
-}
-
-interface SendReadRequest {
-    seqNum: number; // Made-up sequence number to watch for.
-    requestList: ReadBlock[]; // This will be assigned the object that details what was in the request.
-    reqTime: bigint;
-    responseBuffer: Buffer;
-    sent: boolean; // Have we sent the packet yet?
-    rcvd: boolean; // Are we waiting on a reply?
-    timeout: NodeJS.Timeout; // The timeout for use with clearTimeout()
-    readRequestSequence: number; // If a request are splitter in 2 or more parts
-}
-
-interface SendWriteRequest {
-    seqNum: number; // Made-up sequence number to watch for.
-    requestList: WriteBlock[]; // This will be assigned the object that details what was in the request.
-    reqTime: bigint;
-    sent: boolean; // Have we sent the packet yet?
-    rcvd: boolean; // Are we waiting on a reply?
-    timeout: NodeJS.Timeout; // The timeout for use with clearTimeout()
-    writeRequestSequence: number; // Number of parts that the request are splitter in 2 or more parts
-}
-
-interface S7PreparedWriteRequest {
-    seqNum: number; // Made-up sequence number to watch for.
-    writeRequestSequence: number;
-    requestList: WriteBlock[]; // This will be assigned the object that details what was in the request.
-}
-
-interface S7PreparedReadRequest {
-    seqNum: number; // Made-up sequence number to watch for.
-    readRequestSequence: number;
-    requestList: ReadBlock[]; // This will be assigned the object that details what was in the request.
-}
-
-interface S7ItemWrite {
-    address: Address;
-    writeResponse: number;
-    writeQuality: string[] | string;
-    writeBuffer: Buffer;
-    validResponseBuffer: boolean;
-    quality: string[] | string;
-    writeValue: any;
-    valid: boolean;
-    errCode: string;
-    resultReference: undefined;
-}
-
-interface ReadBlock extends OptimizableReadBlocks {
-    parts: number;
-    readRequestSequence: number;
-    readValue?: Buffer;
-    responseBuffer?: Buffer;
-}
-interface OptimizableReadBlocks {
-    totalbyteLength: number;
-    offset: number;
-    byteLengthWithFill: number;
-    addresses: Address[];
-    isOptimized: boolean;
-}
-
-interface WriteBlock {
-    parts: number;
-    itemReference: S7ItemWrite;
-    isOptimized: boolean;
-    writeRequestSequence: number;
-}
-
-interface RequestQueue {
-    request: S7PreparedReadRequest | S7PreparedWriteRequest;
-    action: 'read' | 'write';
-}
-
-interface Address {
-    name: string; // s7 address
-    userName: string; // original address
-    Type: string; // 'DB' | 'I' | 'PI' | 'Q' | 'PQ' | 'M' | 'C' | 'T'
-    dataType: string; // type of address (INT, REAL, X, STRING...)
-    dbNumber: number; // datablock number DB1,REAL8 => 1
-    bitOffset: number; // bitoffset of address DB1,X13.2 => 2 only works with types X
-    offset: number; // offset of data DB1,REAL8 => 8
-    arrayLength: number; // values to read in sequence MX2.2.3 => 3, default 1
-    dataTypeLength: number; // bytes requiered for datatype INT => 2, REAL => 4, X => 1
-    areaS7Code: 0x84 | 0x81 | 0x82 | 0x83 | 0x80 | 0x1c | 0x1d; // s7 areas 0x84, 0x81, 0x82, 0x83, 0x80, 0x1c, 0x1d
-    byteLength: number; // total bytes
-    byteLengthWithFill: number; // byte with fill % 2
-    transportCode: 0x04 | 0x09 | 0x03;
-    valid: boolean; // If the stored adrress is valid
-    promiseResolve?: Function; // We store a resolve function for each address to read or write
-    promiseReject?: Function; // We store a reject function for each address to read or write
 }
