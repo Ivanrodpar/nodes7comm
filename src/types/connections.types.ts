@@ -1,6 +1,6 @@
 export type PacketTimeout = 'ISO' | 'PDU' | 'read' | 'write';
 
-export type ConnectionState = 'disconnected' | 'tcp' | 'isoOnTcp' | 's7comm';
+export type ConnectionState = 'disconnected' | 'TCP' | 'ISOOnTCP' | 's7comm';
 
 export interface ConnectionConfig {
     port: number;

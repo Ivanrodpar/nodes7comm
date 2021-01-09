@@ -11,7 +11,7 @@ export class S7Comm {
 
     private readonly writeReqHeader = Buffer.from([0x03, 0x00, 0x00, 0x1f, 0x02, 0xf0, 0x80, 0x32, 0x01, 0x00, 0x00, 0x08, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x05, 0x01]);
     private readonly readReqHeader = Buffer.from([0x03, 0x00, 0x00, 0x1f, 0x02, 0xf0, 0x80, 0x32, 0x01, 0x00, 0x00, 0x08, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x04, 0x01]);
-    private readonly connectReq = Buffer.from([0x03, 0x00, 0x00, 0x16, 0x11, 0xe0, 0x00, 0x00, 0x00, 0x02, 0x00, 0xc0, 0x01, 0x0a, 0xc1, 0x02, 0x01, 0x00, 0xc2, 0x02, 0x01, 0x02]);
+    private readonly connectionRequest = Buffer.from([0x03, 0x00, 0x00, 0x16, 0x11, 0xe0, 0x00, 0x00, 0x00, 0x02, 0x00, 0xc0, 0x01, 0x0a, 0xc1, 0x02, 0x01, 0x00, 0xc2, 0x02, 0x01, 0x02]);
     private readonly negotiatePDU = Buffer.from([0x03, 0x00, 0x00, 0x19, 0x02, 0xf0, 0x80, 0x32, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0xf0, 0x00, 0x00, 0x08, 0x00, 0x08, 0x03, 0xc0]);
 
     private readonly maxGap: number = 5; // This is the byte tolerance for optimize
@@ -21,7 +21,7 @@ export class S7Comm {
     private readReq = Buffer.alloc(1500);
     private writeReq = Buffer.alloc(1500);
 
-    private client: Socket | undefined = undefined;
+    private socket!: Socket;
     private isoConnectionState: ConnectionState = 'disconnected';
     private maxPDU: number = 960;
     private maxParallel: number = 8;
@@ -31,9 +31,9 @@ export class S7Comm {
 
     private readonly globalTimeout: number = 1500; // Each packet sent to the PLC has a timeout that trigger a timeout function
 
-    private connectTimeout: NodeJS.Timeout | undefined; // setTimeout function
-    private PDUTimeout: NodeJS.Timeout | undefined; // setTimeout function
-    private reconnectTimer: NodeJS.Timeout | undefined; // setTimeout function
+    private connectTimeout!: NodeJS.Timeout; // setTimeout function
+    private PDUTimeout!: NodeJS.Timeout; // setTimeout function
+    private reconnectTimer!: NodeJS.Timeout; // setTimeout function
 
     private lastError: string | undefined; // Save the last error here
 
@@ -867,7 +867,7 @@ export class S7Comm {
     }
 
     private packetTimeout(packetType: PacketTimeout, packetSeqNum?: number): void {
-        this.outputLog('PacketTimeout called with type ' + packetType + ' and seq ' + packetSeqNum, 1, this.connectionId);
+        this.outputLog('PacketTimeout called with type ' + packetType, 1, this.connectionId);
         if (packetType === 'ISO') {
             this.outputLog('TIMED OUT connecting to the PLC - Disconnecting', 0, this.connectionId);
             this.outputLog('Wait for 2 seconds then try again.', 0, this.connectionId);
@@ -938,13 +938,13 @@ export class S7Comm {
 
     private connectionCleanup(): void {
         this.outputLog('Connection cleanup is happening');
-        if (typeof this.client !== 'undefined') {
+        if (typeof this.socket !== 'undefined') {
             // destroying the socket connection
-            this.client.destroy();
-            this.client.removeAllListeners('data');
-            this.client.removeAllListeners('error');
-            this.client.removeAllListeners('close');
-            this.client.on('error', (): void => {
+            this.socket.destroy();
+            this.socket.removeAllListeners('data');
+            this.socket.removeAllListeners('error');
+            this.socket.removeAllListeners('close');
+            this.socket.on('error', (): void => {
                 this.outputLog('TCP socket error following connection cleanup');
             });
         }
@@ -1458,7 +1458,7 @@ export class S7Comm {
         }
     }
 
-    private checkRfcData(data: Buffer): string | Buffer {
+    private _checkRfcData(data: Buffer): string | Buffer {
         let ret: string | Buffer;
         const rfcVersion: number = data[0];
         const tpktLength: number = data.readInt16BE(2);
@@ -1488,24 +1488,23 @@ export class S7Comm {
     }
 
     private onPDUReply(theData: Buffer): void {
-        (this.client as Socket).removeAllListeners('error');
+        this.socket.removeAllListeners('error');
 
-        clearTimeout(this.PDUTimeout as NodeJS.Timeout);
+        clearTimeout(this.PDUTimeout);
 
-        const data = this.checkRfcData(theData);
+        const data = this._checkRfcData(theData);
         if (data === 'fastACK') {
             //Read again and wait for the requested data
             this.outputLog('Fast Acknowledge received.', 0, this.connectionId);
 
-            (this.client as Socket).removeAllListeners('error');
+            this.socket.removeAllListeners('error');
+            this.socket.removeAllListeners('data');
 
-            (this.client as Socket).removeAllListeners('data');
-
-            (this.client as Socket).once('data', (data: Buffer): void => {
+            this.socket.once('data', (data: Buffer): void => {
                 this.onPDUReply(data);
             });
 
-            (this.client as Socket).on('error', (err: Error): void => {
+            this.socket.on('error', (err: Error): void => {
                 console.log(err);
                 this.readWriteError(new Error('Error on PDURefly'));
             });
@@ -1533,11 +1532,11 @@ export class S7Comm {
                 this.maxPDU = this.requestMaxPDU;
             }
             this.outputLog('Received PDU Response - Proceeding with PDU ' + this.maxPDU + ' and ' + this.maxParallel + ' max parallel connections.', 0, this.connectionId);
-            (this.client as Socket).on('data', (data: Buffer): void => {
+            this.socket.on('data', (data: Buffer): void => {
                 this.onResponse(data);
             });
-            (this.client as Socket).on('error', (): void => {
-                this.readWriteError(new Error('Error on client 2, onPDUReply function'));
+            this.socket.on('error', (): void => {
+                this.readWriteError(new Error('Error on socket 2, onPDUReply function'));
             });
 
             if (!this.connectCBIssued && typeof this.connectCallback === 'function') {
@@ -1553,7 +1552,7 @@ export class S7Comm {
             const timeHandler = (): void => {
                 this.connectionReset();
             };
-            (this.client as Socket).destroy();
+            this.socket.destroy();
             clearTimeout(this.reconnectTimer as NodeJS.Timeout);
             this.reconnectTimer = setTimeout(timeHandler, 2000);
         }
@@ -1657,18 +1656,18 @@ export class S7Comm {
     }
 
     private onISOConnectReply(data: Buffer): void {
-        (this.client as Socket).removeAllListeners('error');
+        this.socket.removeAllListeners('error');
 
-        clearTimeout(this.connectTimeout as NodeJS.Timeout);
+        clearTimeout(this.connectTimeout);
 
-        // ignore if we're not expecting it - prevents write after end exception as of #80
-        if (this.isoConnectionState != 'tcp') {
+        // Ignore if we are not expecting it
+        if (this.isoConnectionState !== 'TCP') {
             this.outputLog('Ignoring ISO connect reply, expecting isoConnectionState of 2, is currently ' + this.isoConnectionState, 0, this.connectionId);
             return;
         }
 
         // Track the connection state
-        this.isoConnectionState = 'isoOnTcp'; // ISO-ON-TCP connected, Wait for PDU response.
+        this.isoConnectionState = 'ISOOnTCP'; // ISO-ON-TCP connected, Wait for PDU response.
 
         // Expected length is from packet sniffing - some applications may be different, especially using routing - not considered yet.
         if (data.readInt16BE(2) !== data.length || data.length < 22 || data[5] !== 0xd0 || data[4] !== data.length - 5) {
@@ -1689,31 +1688,31 @@ export class S7Comm {
         };
 
         this.PDUTimeout = setTimeout(timeHandler, this.globalTimeout);
-        (this.client as Socket).once('data', (data: Buffer): void => {
+        this.socket.once('data', (data: Buffer): void => {
             this.onPDUReply(data);
         });
 
-        (this.client as Socket).on('error', (err: Error): void => {
+        this.socket.on('error', (err: Error): void => {
             console.log(err);
+            // TODO: Add logger
             this.readWriteError(new Error('Error on ISO Reply'));
         });
 
-        (this.client as Socket).write(this.negotiatePDU.slice(0, 25));
+        this.socket.write(this.negotiatePDU.slice(0, 25));
     }
 
     private onTCPConnect(): void {
-        this.outputLog('TCP Connection Established to ' + (this.client as Socket).remoteAddress + ' on port ' + (this.client as Socket).remotePort, 0, this.connectionId);
+        this.outputLog('TCP Connection Established to ' + this.socket.remoteAddress + ' on port ' + this.socket.remotePort, 0, this.connectionId);
         this.outputLog('Will attempt ISO-on-TCP connection', 0, this.connectionId);
         // Track the connection state
-        this.isoConnectionState = 'tcp'; // 2 = TCP connected, wait for ISO connection confirmation
+        this.isoConnectionState = 'TCP'; // 2 = TCP connected, wait for ISO connection confirmation
 
         // Send an ISO-on-TCP connection request.
-
         const timeHandler = (): void => {
             this.packetTimeout('ISO');
         };
         this.connectTimeout = setTimeout(timeHandler, this.globalTimeout);
-        const connBuf = this.connectReq;
+        const connBuf = this.connectionRequest;
 
         if (this.localTSAP !== undefined && this.remoteTSAP !== undefined) {
             this.outputLog('Using localTSAP [0x' + this.localTSAP.toString(16) + '] and remoteTSAP [0x' + this.remoteTSAP.toString(16) + ']', 0, this.connectionId);
@@ -1725,34 +1724,36 @@ export class S7Comm {
         }
 
         // Listen for a reply.
-        (this.client as Socket).once('data', (data: Buffer): void => {
+        this.socket.once('data', (data: Buffer): void => {
             this.onISOConnectReply(data);
         });
 
         // // Hook up the event that fires on disconnect
-        (this.client as Socket).on('end', (): void => {
+        this.socket.on('end', (): void => {
             console.log('end');
+            // TODO: Need handler
             // this.onClientDisconnect();
         });
 
-        // listen for close (caused by us sending an end or caused by timeout socket)
-        (this.client as Socket).on('close', (hasError: boolean): void => {
+        // listen for close (caused by us, sending an end or caused by timeout socket)
+        this.socket.on('close', (hasError: boolean): void => {
             if (hasError) {
                 this.outputLog('Connection has been closed due to a connection error or inactivity');
                 this.connectionReset();
             }
         });
 
-        (this.client as Socket).on('error', (err: Error): void => {
+        this.socket.on('error', (err: Error): void => {
             console.log('error');
-            this.connectionReset();
             console.log(err);
+            // TODO: Add logger
+            this.connectionReset();
         });
 
-        (this.client as Socket).write(connBuf);
+        this.socket.write(connBuf);
     }
 
-    private connectNow(): void {
+    private _connectNow(): void {
         // prevents any reconnect timer to fire this again
         clearTimeout(this.reconnectTimer as NodeJS.Timeout);
 
@@ -1763,26 +1764,26 @@ export class S7Comm {
 
         this.connectionCleanup();
 
-        this.client = new Socket();
+        this.socket = new Socket();
 
-        this.client = connect({
+        this.socket = connect({
             port: this.ConnectionConfig.port,
             host: this.ConnectionConfig.host,
         });
 
-        this.client.setTimeout(this.ConnectionConfig.timeout || 5000, (): void => {
-            (this.client as Socket).destroy();
+        this.socket.setTimeout(this.ConnectionConfig.timeout || 5000, (): void => {
+            this.socket.destroy();
             this.connectError(new Error('Error connecting - destroying connection'));
         });
 
-        this.client.once('connect', (): void => {
-            (this.client as Socket).setTimeout(0);
+        this.socket.once('connect', (): void => {
+            this.socket.setTimeout(0);
             this.onTCPConnect();
         });
 
-        this.client.on('error', (err): void => {
-            console.log(err);
-            (this.client as Socket).destroy();
+        this.socket.on('error', (err): void => {
+            this.outputLog(err);
+            this.socket.destroy();
             this.connectError(new Error('Something went wrong trying to connect'));
         });
 
@@ -2195,7 +2196,7 @@ export class S7Comm {
 
     public initiateConnection(callback?: Function): void {
         this.connectCallback = callback;
-        this.connectNow();
+        this._connectNow();
     }
 
     public async addItems(directions: string[]): Promise<void> {
