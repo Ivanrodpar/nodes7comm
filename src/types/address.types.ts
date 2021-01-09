@@ -1,5 +1,5 @@
 export interface Address {
-    name: string; // s7 address
+    name: string; // s7 name for logs
     userName: string; // original address
     Type: string; // 'DB' | 'I' | 'PI' | 'Q' | 'PQ' | 'M' | 'C' | 'T'
     dataType: string; // type of address (INT, REAL, X, STRING...)

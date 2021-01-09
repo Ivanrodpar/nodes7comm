@@ -101,7 +101,7 @@ export class S7Comm {
         }
     }
 
-    private doNothing(arg: string | number | boolean | (string | number | boolean)[]): string | number | boolean | (string | number | boolean)[] {
+    private doNothing(arg: any): any {
         return arg;
     }
 

@@ -1,1 +1,3 @@
-export { S7Comm, ConnectionConfig } from './nodes7comm';
+export { S7Comm } from './nodes7comm';
+
+export { ConnectionConfig } from './types/connections.types'; 
