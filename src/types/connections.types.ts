@@ -3,14 +3,15 @@ export type PacketTimeout = 'ISO' | 'PDU' | 'read' | 'write';
 export type ConnectionState = 'disconnected' | 'TCP' | 'ISOOnTCP' | 's7comm';
 
 export interface ConnectionConfig {
-    port: number;
     host: string;
+    port: number;
     rack?: number;
     slot?: number;
     timeout?: number;
     silentMode?: boolean;
     localTSAP?: number;
     remoteTSAP?: number;
-    callback?: Function;
+    _callback?: any;
     connectionName?: string;
+    autoConnect?: boolean;
 }

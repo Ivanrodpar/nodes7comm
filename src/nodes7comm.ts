@@ -4,9 +4,9 @@ import { format } from 'util';
 import { ConnectionState, PacketTimeout, ConnectionConfig } from './types/connections.types';
 import { RequestQueue, SendReadRequest, SendWriteRequest, S7ItemWrite, ReadBlock, S7PreparedReadRequest, S7PreparedWriteRequest, OptimizableReadBlocks, WriteBlock } from './types/request.types';
 import { Address } from './types/address.types';
+import { EventEmitter } from 'events';
 
-export class S7Comm {
-    private silentMode: boolean = false; // If true, hidde all logs
+export class S7Comm extends EventEmitter {
     private effectiveDebugLevel: number = 0; // Only show logs equal or lower that this number
 
     private readonly writeReqHeader = Buffer.from([0x03, 0x00, 0x00, 0x1f, 0x02, 0xf0, 0x80, 0x32, 0x01, 0x00, 0x00, 0x08, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x05, 0x01]);
@@ -27,7 +27,7 @@ export class S7Comm {
     private maxParallel: number = 8;
     private parallelJobsNow: number = 0;
     private doNotOptimize: boolean = false;
-    private connectCallback: Function | undefined = undefined;
+    private connectCallback: (() => any) | undefined;
 
     private readonly globalTimeout: number = 1500; // Each packet sent to the PLC has a timeout that trigger a timeout function
 
@@ -36,11 +36,6 @@ export class S7Comm {
     private reconnectTimer!: NodeJS.Timeout; // setTimeout function
 
     private lastError: string | undefined; // Save the last error here
-
-    private rack: number = 0;
-    private slot: number = 1;
-    private localTSAP: number | undefined = undefined;
-    private remoteTSAP: number | undefined = undefined;
 
     private requestQueue: RequestQueue[] = [];
     private sentReadPacketArray: SendReadRequest[] = []; // Read packets sent, and waiting for response
@@ -53,42 +48,58 @@ export class S7Comm {
     public directionsTranslated: { [key: string]: string } = {};
     private storedAdresses: Address[] = [];
 
-    private translationCB: Function = this.doNothing;
-    private ConnectionConfig: ConnectionConfig;
+    private translationCB: (tags: string) => string = this.doNothing;
+    private connectionConfig: ConnectionConfig = {
+        host: '0.0.0.0',
+        port: 102,
+        rack: 0,
+        slot: 1,
+        timeout: 5000,
+        silentMode: false, // If true, hidde all logs
+        localTSAP: undefined,
+        remoteTSAP: undefined,
+        connectionName: 'S7 1',
+        autoConnect: true,
+    };
     private connectionId: string | undefined = undefined;
+    private autoConnect: boolean = true;
 
     private connectCBIssued: boolean = false;
 
-    public constructor(ConnectionConfig: ConnectionConfig) {
-        if (typeof ConnectionConfig.silentMode !== 'undefined') {
-            this.silentMode = ConnectionConfig.silentMode;
+    public constructor(connectionConfig: ConnectionConfig) {
+        super();
+        if (connectionConfig.silentMode) {
+            this.connectionConfig.silentMode = connectionConfig.silentMode;
         }
-        if (typeof ConnectionConfig === 'undefined') {
-            ConnectionConfig = { port: 102, host: '0.0.0.0' };
+        if (connectionConfig.rack) {
+            this.connectionConfig.rack = connectionConfig.rack;
         }
-        if (typeof ConnectionConfig.rack !== 'undefined') {
-            this.rack = ConnectionConfig.rack;
+        if (connectionConfig.slot) {
+            this.connectionConfig.slot = connectionConfig.slot;
         }
-        if (typeof ConnectionConfig.slot !== 'undefined') {
-            this.slot = ConnectionConfig.slot;
+        if (connectionConfig.localTSAP) {
+            this.connectionConfig.localTSAP = connectionConfig.localTSAP;
         }
-        if (typeof ConnectionConfig.localTSAP !== 'undefined') {
-            this.localTSAP = ConnectionConfig.localTSAP;
+        if (connectionConfig.remoteTSAP) {
+            this.connectionConfig.remoteTSAP = connectionConfig.remoteTSAP;
         }
-        if (typeof ConnectionConfig.remoteTSAP !== 'undefined') {
-            this.remoteTSAP = ConnectionConfig.remoteTSAP;
-        }
-        if (typeof ConnectionConfig.connectionName === 'undefined') {
-            this.connectionId = ConnectionConfig.host + ' S' + this.slot;
+        if (!connectionConfig.connectionName) {
+            this.connectionId = connectionConfig.host + ' S' + this.connectionConfig.slot;
         } else {
-            this.connectionId = ConnectionConfig.connectionName;
+            this.connectionId = connectionConfig.connectionName;
         }
-        this.ConnectionConfig = ConnectionConfig;
+        if (connectionConfig.autoConnect === false) {
+            this.autoConnect = false;
+        } else {
+            this.autoConnect = true;
+        }
+        this.connectionConfig.host = connectionConfig.host;
+        this.connectionConfig.port = connectionConfig.port;
         this.connectCBIssued = false;
     }
 
-    private outputLog(txt: string | {}, debugLevel?: number, id?: string): void {
-        if (this.silentMode) return;
+    private outputLog(txt: any, debugLevel?: number, id?: string): void {
+        if (this.connectionConfig.silentMode) return;
 
         let idtext;
         if (typeof id === 'undefined') {
@@ -107,11 +118,11 @@ export class S7Comm {
 
     public setTranslationCB(variables: { [key: string]: any }): void {
         Object.keys(variables).forEach((key): void => {
-            if (typeof variables[key] === 'undefined' || variables[key] === '') {
+            if (!variables[key]) {
                 delete variables[key];
             }
         });
-        this.directionsTranslated = variables;
+        this.directionsTranslated = { ...variables };
         this.translationCB = (tag: string): any => {
             if (this.directionsTranslated[tag]) {
                 return this.directionsTranslated[tag];
@@ -128,11 +139,11 @@ export class S7Comm {
             if (this.requestQueue[i].action === 'read') {
                 const req = this.requestQueue[i].request as SendReadRequest;
                 for (let u = 0; u < req.requestList.length; u++) {
-                    (req.requestList[u].addresses[0].promiseReject as Function)(this.lastError);
+                    (req.requestList[u].addresses[0].promiseReject as (...arg: any) => void)(this.lastError);
                 }
             } else {
                 const req = this.requestQueue[i].request as SendWriteRequest;
-                (req.requestList[0].itemReference.address.promiseReject as Function)(this.lastError);
+                (req.requestList[0].itemReference.address.promiseReject as (...arg: any) => void)(this.lastError);
             }
         }
         this.requestQueue = [];
@@ -916,18 +927,19 @@ export class S7Comm {
 
     private connectionReset(): void {
         this.isoConnectionState = 'disconnected';
-        if (this.client) {
-            this.client.destroy();
+        if (this.socket) {
+            this.socket.destroy();
         }
-        if (!this.isWaiting()) {
-            this.connectNow();
+        if (!this.isWaiting() && this.autoConnect) {
+            this._connectNow();
         }
     }
 
     private connectError(err: Error): void {
-        // Note that the first time we are connecting we call the connectCallback, then after that, we reconnect again on a connection error
         this.isoConnectionState = 'disconnected';
-        this.outputLog('We Caught a connect error: ' + err.message, 0, this.connectionId);
+        this.emit('timeout', `Unable to connect to host ${this.connectionConfig.host} and port ${this.connectionConfig.port}`);
+        this.outputLog('We caught a connect error: ' + err.message, 0, this.connectionId);
+        this.outputLog('We will trying to connect again', 0, this.connectionId);
         this.connectionReset();
     }
 
@@ -948,8 +960,8 @@ export class S7Comm {
                 this.outputLog('TCP socket error following connection cleanup');
             });
         }
-        clearTimeout(this.connectTimeout as NodeJS.Timeout);
-        clearTimeout(this.PDUTimeout as NodeJS.Timeout);
+        clearTimeout(this.connectTimeout);
+        clearTimeout(this.PDUTimeout);
     }
 
     private findReadIndexOfSeqNum(seqNum: number): number | undefined {
@@ -1312,7 +1324,7 @@ export class S7Comm {
 
                     const result: { [key: string]: any } = {};
                     result[this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].userName] = value;
-                    (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseResolve as Function)(result);
+                    (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseResolve as (...arg: any) => void)(result);
 
                     for (let u = 1; u < this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses.length; u++) {
                         const pastOffset = this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u - 1].offset;
@@ -1327,11 +1339,11 @@ export class S7Comm {
 
                         const result: { [key: string]: any } = {};
                         result[this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].userName] = value;
-                        (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].promiseResolve as Function)(result);
+                        (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].promiseResolve as (...arg: any) => void)(result);
                     }
                 } else {
                     for (let u = 0; u < this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses.length; u++) {
-                        (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseReject as Function)(this.lastError);
+                        (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseReject as (...arg: any) => void)(this.lastError);
                     }
                 }
             }
@@ -1357,9 +1369,9 @@ export class S7Comm {
                 const result: { [key: string]: any } = {};
                 result[this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].userName] = value;
 
-                (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseResolve as Function)(result);
+                (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseResolve as (...arg: any) => void)(result);
             } else {
-                (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseReject as Function)();
+                (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseReject as (...arg: any) => void)();
             }
         } else {
             // we must wait until other parts comming for check
@@ -1415,9 +1427,9 @@ export class S7Comm {
                 if (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.validResponseBuffer) {
                     const result: { [key: string]: any } = {};
                     result[this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.userName] = this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.writeValue;
-                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseResolve as Function)(result);
+                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseResolve as (...arg: any) => void)(result);
                 } else {
-                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseReject as Function)();
+                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseReject as (...arg: any) => void)();
                 }
             }
         } else if (this.sentWritePacketArray[foundSeqIndex].requestList[0].parts > 1 && this.checkWriteResponseParts(this.sentWritePacketArray[foundSeqIndex].writeRequestSequence as number)) {
@@ -1434,9 +1446,9 @@ export class S7Comm {
             if (validResponse) {
                 const result: { [key: string]: any } = {};
                 result[this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.userName] = this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.writeValue;
-                (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseResolve as Function)(result);
+                (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseResolve as (...arg: any) => void)(result);
             } else {
-                (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseReject as Function)();
+                (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseReject as (...arg: any) => void)();
             }
         } else {
             // we must wait until other parts comming for check
@@ -1532,6 +1544,7 @@ export class S7Comm {
                 this.maxPDU = this.requestMaxPDU;
             }
             this.outputLog('Received PDU Response - Proceeding with PDU ' + this.maxPDU + ' and ' + this.maxParallel + ' max parallel connections.', 0, this.connectionId);
+            this.emit('connect');
             this.socket.on('data', (data: Buffer): void => {
                 this.onResponse(data);
             });
@@ -1574,16 +1587,16 @@ export class S7Comm {
             return;
         }
 
-        const data = this.checkRfcData(theData);
+        const data = this._checkRfcData(theData);
         if (data === 'fastACK') {
             //read again and wait for the requested data
             this.outputLog('Fast Acknowledge received.', 0, this.connectionId);
-            (this.client as Socket).removeAllListeners('error');
-            (this.client as Socket).removeAllListeners('data');
-            (this.client as Socket).on('data', (data: Buffer): void => {
+            this.socket.removeAllListeners('error');
+            this.socket.removeAllListeners('data');
+            this.socket.on('data', (data: Buffer): void => {
                 this.onResponse(data);
             });
-            (this.client as Socket).on('error', (): void => {
+            this.socket.on('error', (): void => {
                 this.readWriteError(new Error('Error onisoclient, onReadResponse1'));
             });
         } else if (data instanceof Buffer && data[7] === 0x32) {
@@ -1714,13 +1727,13 @@ export class S7Comm {
         this.connectTimeout = setTimeout(timeHandler, this.globalTimeout);
         const connBuf = this.connectionRequest;
 
-        if (this.localTSAP !== undefined && this.remoteTSAP !== undefined) {
-            this.outputLog('Using localTSAP [0x' + this.localTSAP.toString(16) + '] and remoteTSAP [0x' + this.remoteTSAP.toString(16) + ']', 0, this.connectionId);
-            connBuf.writeUInt16BE(this.localTSAP, 16);
-            connBuf.writeUInt16BE(this.remoteTSAP, 20);
+        if (this.connectionConfig.localTSAP !== undefined && this.connectionConfig.remoteTSAP !== undefined) {
+            this.outputLog('Using localTSAP [0x' + this.connectionConfig.localTSAP.toString(16) + '] and remoteTSAP [0x' + this.connectionConfig.remoteTSAP.toString(16) + ']', 0, this.connectionId);
+            connBuf.writeUInt16BE(this.connectionConfig.localTSAP, 16);
+            connBuf.writeUInt16BE(this.connectionConfig.remoteTSAP, 20);
         } else {
-            this.outputLog('Using rack [' + this.rack + '] and slot [' + this.slot + ']', 0, this.connectionId);
-            connBuf[21] = this.rack * 32 + this.slot;
+            this.outputLog('Using rack [' + this.connectionConfig.rack + '] and slot [' + this.connectionConfig.slot + ']', 0, this.connectionId);
+            connBuf[21] = (this.connectionConfig.rack as number) * 32 + (this.connectionConfig.slot as number);
         }
 
         // Listen for a reply.
@@ -1755,7 +1768,7 @@ export class S7Comm {
 
     private _connectNow(): void {
         // prevents any reconnect timer to fire this again
-        clearTimeout(this.reconnectTimer as NodeJS.Timeout);
+        clearTimeout(this.reconnectTimer);
 
         // Don't re-trigger.
         if (this.isoConnectionState !== 'disconnected') {
@@ -1767,13 +1780,13 @@ export class S7Comm {
         this.socket = new Socket();
 
         this.socket = connect({
-            port: this.ConnectionConfig.port,
-            host: this.ConnectionConfig.host,
+            port: this.connectionConfig.port,
+            host: this.connectionConfig.host,
         });
 
-        this.socket.setTimeout(this.ConnectionConfig.timeout || 5000, (): void => {
+        this.socket.setTimeout(this.connectionConfig.timeout || 5000, (): void => {
             this.socket.destroy();
-            this.connectError(new Error('Error connecting - destroying connection'));
+            this.connectError(new Error('Connection timeout - destroying connection'));
         });
 
         this.socket.once('connect', (): void => {
@@ -1787,7 +1800,7 @@ export class S7Comm {
             this.connectError(new Error('Something went wrong trying to connect'));
         });
 
-        this.outputLog('Attempting to connect to host...', 0, this.connectionId);
+        this.outputLog(`Attempting to connect to host ${this.connectionConfig.host} and port ${this.connectionConfig.port}`, 0, this.connectionId);
     }
 
     private sendNextRequest(): void {
@@ -1993,7 +2006,7 @@ export class S7Comm {
                     reqTime: process.hrtime.bigint(),
                 });
                 this.parallelJobsNow += 1;
-                (this.client as Socket).write(this.readReq.slice(0, 19 + readPacketArray[i].requestList.length * 12));
+                this.socket.write(this.readReq.slice(0, 19 + readPacketArray[i].requestList.length * 12));
             } else {
                 const timeHandler = (): void => {
                     this.packetTimeout('read', readPacketArray[i].seqNum);
@@ -2175,7 +2188,7 @@ export class S7Comm {
                     reqTime: process.hrtime.bigint(),
                 });
                 this.parallelJobsNow += 1;
-                (this.client as Socket).write(this.writeReq.slice(0, 19 + dataBufferPointer + writePacketArray[i].requestList.length * 12)); // was 31
+                this.socket.write(this.writeReq.slice(0, 19 + dataBufferPointer + writePacketArray[i].requestList.length * 12)); // was 31
                 this.outputLog('Sending Write Packet With Sequence Number ' + writePacketArray[i].seqNum, 0, this.connectionId);
             } else {
                 const timeHandler = (): void => {
@@ -2194,9 +2207,8 @@ export class S7Comm {
         }
     }
 
-    public initiateConnection(callback?: Function): void {
-        this.connectCallback = callback;
-        this._connectNow();
+    public async initiateConnection(): Promise<void> {
+        await this._connectNow();
     }
 
     public async addItems(directions: string[]): Promise<void> {

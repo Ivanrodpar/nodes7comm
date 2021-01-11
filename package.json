@@ -4,7 +4,9 @@
   "description": "Library to establish a connection with S7 PLC's",
   "main": "lib/index.js",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "nodemon-test": "npx ts-node ./test/index.test.ts",
+    "test": "npx nodemon --exec \"npm run nodemon-test\""
   },
   "files": [
     "lib"
@@ -29,7 +31,9 @@
     "eslint": "^7.17.0",
     "eslint-config-prettier": "^7.1.0",
     "eslint-plugin-prettier": "^3.3.1",
+    "nodemon": "^2.0.7",
     "prettier": "^2.2.1",
+    "ts-node": "^9.1.1",
     "typescript": "^4.1.3"
   }
 }

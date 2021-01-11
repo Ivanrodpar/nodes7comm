@@ -5,3 +5,5 @@
 .prettierignore
 .prettierrc.js
 tsconfig.json
+nodemon.json
+test/**
