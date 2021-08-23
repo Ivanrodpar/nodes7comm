@@ -697,7 +697,6 @@ export class NodeS7Comm extends EventEmitter {
                     writeBuffer.writeUInt8(Math.min(address.dataTypeLength - 2, (writeValue as string).length), thePointer + 1); // Array length is requested val, -2 is string length
 
                     for (let charOffset = 2; charOffset < address.dataTypeLength; charOffset++) {
-                        console.log(address.arrayLength, charOffset, writeValue);
                         if (charOffset < (writeValue as string).length + 2) {
                             writeBuffer.writeUInt8((writeValue as string).charCodeAt(charOffset - 2), thePointer + charOffset);
                         } else {
@@ -1681,8 +1680,7 @@ export class NodeS7Comm extends EventEmitter {
 
             // Hook up the event that fires on disconnect
             this.client.on('end', (): void => {
-                console.log('end');
-                // this.onClientDisconnect();
+                //
             });
 
             // listen for close (caused by us sending an end or caused by timeout socket)
@@ -1981,7 +1979,6 @@ export class NodeS7Comm extends EventEmitter {
 
     private prepareWritePacket(instantWriteBlockList: S7ItemWrite[]): S7PreparedWriteRequest[] {
         const itemList = instantWriteBlockList;
-        console.log(instantWriteBlockList);
         itemList.sort(this.itemListSorter);
 
         const maxByteRequest = 4 * Math.floor((this.maxPDU - 18 - 12) / 4); // Absolutely must not break a real array into two requests.  Maybe we can extend by two bytes when not DINT/REAL/INT.
@@ -2021,7 +2018,6 @@ export class NodeS7Comm extends EventEmitter {
                 }
 
                 // Now we convert our value to a buffer
-                console.log(itemList[i].address, itemList[i].writeValue, parts);
                 const writeBuffer = this.bufferizeValue(itemList[i].address, itemList[i].writeValue);
 
                 requestList[thisRequest].itemReference.writeBuffer = Buffer.from(writeBuffer.buffer, lengthOffset, lengthOffset + requestList[thisRequest].itemReference.address.byteLengthWithFill);
