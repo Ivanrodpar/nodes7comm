@@ -13,6 +13,6 @@ export interface Address {
     byteLengthWithFill: number; // byte with fill % 2
     transportCode: 0x04 | 0x09 | 0x03;
     valid: boolean; // If the stored adrress is valid
-    promiseResolve?: Function; // We store a resolve function for each address to read or write
-    promiseReject?: Function; // We store a reject function for each address to read or write
+    promiseResolve?: (result: { [key: string]: any }) => any; // We store a resolve function for each address to read or write
+    promiseReject?: () => void; // We store a reject function for each address to read or write
 }

@@ -2,15 +2,18 @@ export type PacketTimeout = 'ISO' | 'PDU' | 'read' | 'write';
 
 export type ConnectionState = 'disconnected' | 'tcp' | 'isoOnTcp' | 's7comm';
 
-export interface ConnectionConfig {
-    port: number;
+export interface Nodes7CommConfig {
     host: string;
+    port?: number;
     rack?: number;
     slot?: number;
-    timeout?: number;
-    silentMode?: boolean;
+    connectionTimeout?: number;
+    requestTimeout?: number;
     localTSAP?: number;
     remoteTSAP?: number;
-    callback?: Function;
+    callback?: any;
     connectionName?: string;
+    optimize?: boolean;
+    autoReconnect?: boolean;
+    logLevel?: 'none' | 'error' | 'warn' | 'info';
 }

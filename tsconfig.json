@@ -4,8 +4,13 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "esModuleInterop": true,
-    "lib": ["es2015", "es2016"],
-    "types": ["node"],
+    "lib": [
+      "es2015",
+      "es2016"
+    ],
+    "types": [
+      "node"
+    ],
     "declaration": true,
     "outDir": "lib",
     "rootDir": "src",
@@ -14,9 +19,9 @@
   "exclude": [
     "lib",
     "node_modules",
-    "src/**/*.spec.ts"
+    "src/test/**.ts"
   ],
   "include": [
-    "src"
-  ]
+    "src/**.ts",
+  ],
 }

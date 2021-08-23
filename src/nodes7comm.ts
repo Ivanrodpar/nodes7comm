@@ -1,46 +1,52 @@
-import { connect, Socket } from 'net';
+import { Socket } from 'net';
 import { format } from 'util';
+import { EventEmitter } from 'stream';
 
-import { ConnectionState, PacketTimeout, ConnectionConfig } from './types/connections.types';
+import { ConnectionState, PacketTimeout, Nodes7CommConfig } from './types/nodes7comm-config.types';
 import { RequestQueue, SendReadRequest, SendWriteRequest, S7ItemWrite, ReadBlock, S7PreparedReadRequest, S7PreparedWriteRequest, OptimizableReadBlocks, WriteBlock } from './types/request.types';
 import { Address } from './types/address.types';
+import { NodeS7CommEvents } from './types/nodes7comm-events.types';
+import { getEmptyAddress, getEmptyS7ItemWrite } from './address';
 
-export class S7Comm {
-    private silentMode: boolean = false; // If true, hidde all logs
-    private effectiveDebugLevel: number = 0; // Only show logs equal or lower that this number
+export declare interface NodeS7Comm {
+    on<U extends keyof NodeS7CommEvents>(event: U, listener: NodeS7CommEvents[U]): this;
+    emit<U extends keyof NodeS7CommEvents>(event: U, ...args: Parameters<NodeS7CommEvents[U]>): boolean;
+}
 
+export class NodeS7Comm extends EventEmitter {
     private readonly writeReqHeader = Buffer.from([0x03, 0x00, 0x00, 0x1f, 0x02, 0xf0, 0x80, 0x32, 0x01, 0x00, 0x00, 0x08, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x05, 0x01]);
     private readonly readReqHeader = Buffer.from([0x03, 0x00, 0x00, 0x1f, 0x02, 0xf0, 0x80, 0x32, 0x01, 0x00, 0x00, 0x08, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x04, 0x01]);
     private readonly connectReq = Buffer.from([0x03, 0x00, 0x00, 0x16, 0x11, 0xe0, 0x00, 0x00, 0x00, 0x02, 0x00, 0xc0, 0x01, 0x0a, 0xc1, 0x02, 0x01, 0x00, 0xc2, 0x02, 0x01, 0x02]);
     private readonly negotiatePDU = Buffer.from([0x03, 0x00, 0x00, 0x19, 0x02, 0xf0, 0x80, 0x32, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0xf0, 0x00, 0x00, 0x08, 0x00, 0x08, 0x03, 0xc0]);
-
-    private readonly maxGap: number = 5; // This is the byte tolerance for optimize
+    private readonly maxGap: number = 10; // This is the byte tolerance for optimize
     private readonly requestMaxParallel: number = 8; // Our expected parrallels jobs
     private readonly requestMaxPDU: number = 960; // Our expected bytes size that we can send to the PLC
 
     private readReq = Buffer.alloc(1500);
     private writeReq = Buffer.alloc(1500);
 
-    private client: Socket | undefined = undefined;
+    private client!: Socket;
     private isoConnectionState: ConnectionState = 'disconnected';
     private maxPDU: number = 960;
     private maxParallel: number = 8;
     private parallelJobsNow: number = 0;
-    private doNotOptimize: boolean = false;
-    private connectCallback: Function | undefined = undefined;
-
-    private readonly globalTimeout: number = 1500; // Each packet sent to the PLC has a timeout that trigger a timeout function
 
     private connectTimeout: NodeJS.Timeout | undefined; // setTimeout function
     private PDUTimeout: NodeJS.Timeout | undefined; // setTimeout function
     private reconnectTimer: NodeJS.Timeout | undefined; // setTimeout function
 
-    private lastError: string | undefined; // Save the last error here
-
+    private connectionName: string | undefined = undefined;
+    private host: string;
+    private port: number = 102;
     private rack: number = 0;
     private slot: number = 1;
     private localTSAP: number | undefined = undefined;
     private remoteTSAP: number | undefined = undefined;
+    private optimize: boolean = true;
+    private autoReconnect: boolean = true;
+    private connectionTimeout: number = 5000;
+    private requestTimeout: number = 1500; // Each packet sent to the PLC has a timeout that trigger a timeout function
+    private logLevel: number = 0; // Only show logs equal or lower that this number. none =0; error = 1; warn = 2; info = 3;
 
     private requestQueue: RequestQueue[] = [];
     private sentReadPacketArray: SendReadRequest[] = []; // Read packets sent, and waiting for response
@@ -53,100 +59,104 @@ export class S7Comm {
     public directionsTranslated: { [key: string]: string } = {};
     private storedAdresses: Address[] = [];
 
-    private translationCB: Function = this.doNothing;
-    private ConnectionConfig: ConnectionConfig;
-    private connectionId: string | undefined = undefined;
-
-    private connectCBIssued: boolean = false;
-
-    public constructor(ConnectionConfig: ConnectionConfig) {
-        if (typeof ConnectionConfig.silentMode !== 'undefined') {
-            this.silentMode = ConnectionConfig.silentMode;
+    public constructor(connectionConfig: Nodes7CommConfig) {
+        super();
+        if (!connectionConfig) {
+            throw new Error('Missing connectionConfig object');
         }
-        if (typeof ConnectionConfig === 'undefined') {
-            ConnectionConfig = { port: 102, host: '0.0.0.0' };
-        }
-        if (typeof ConnectionConfig.rack !== 'undefined') {
-            this.rack = ConnectionConfig.rack;
-        }
-        if (typeof ConnectionConfig.slot !== 'undefined') {
-            this.slot = ConnectionConfig.slot;
-        }
-        if (typeof ConnectionConfig.localTSAP !== 'undefined') {
-            this.localTSAP = ConnectionConfig.localTSAP;
-        }
-        if (typeof ConnectionConfig.remoteTSAP !== 'undefined') {
-            this.remoteTSAP = ConnectionConfig.remoteTSAP;
-        }
-        if (typeof ConnectionConfig.connectionName === 'undefined') {
-            this.connectionId = ConnectionConfig.host + ' S' + this.slot;
+        if (!connectionConfig.host) {
+            throw new Error('Missing host');
         } else {
-            this.connectionId = ConnectionConfig.connectionName;
+            this.host = connectionConfig.host;
         }
-        this.ConnectionConfig = ConnectionConfig;
-        this.connectCBIssued = false;
-    }
-
-    private outputLog(txt: string | {}, debugLevel?: number, id?: string): void {
-        if (this.silentMode) return;
-
-        let idtext;
-        if (typeof id === 'undefined') {
-            idtext = '';
+        if (typeof connectionConfig.logLevel === 'string') {
+            switch (connectionConfig.logLevel) {
+                case 'error':
+                    this.logLevel = 1;
+                    break;
+                case 'warn':
+                    this.logLevel = 2;
+                    break;
+                case 'info':
+                    this.logLevel = 3;
+                    break;
+                default:
+                    this.logLevel = 0;
+                    break;
+            }
+        }
+        if (typeof connectionConfig.port === 'number') {
+            this.port = connectionConfig.port;
+        }
+        if (typeof connectionConfig.rack === 'number') {
+            this.rack = connectionConfig.rack;
+        }
+        if (typeof connectionConfig.slot === 'number') {
+            this.slot = connectionConfig.slot;
+        }
+        if (typeof connectionConfig.localTSAP === 'number') {
+            this.localTSAP = connectionConfig.localTSAP;
+        }
+        if (typeof connectionConfig.remoteTSAP === 'number') {
+            this.remoteTSAP = connectionConfig.remoteTSAP;
+        }
+        if (typeof connectionConfig.optimize === 'boolean') {
+            this.optimize = connectionConfig.optimize;
+        }
+        if (typeof connectionConfig.autoReconnect === 'boolean') {
+            this.autoReconnect = connectionConfig.autoReconnect;
+        }
+        if (typeof connectionConfig.connectionTimeout === 'number') {
+            this.connectionTimeout = connectionConfig.connectionTimeout;
+        }
+        if (typeof connectionConfig.requestTimeout === 'number') {
+            this.requestTimeout = connectionConfig.requestTimeout;
+        }
+        if (typeof connectionConfig.connectionName === 'undefined') {
+            this.connectionName = connectionConfig.host;
         } else {
-            idtext = ' ' + id;
-        }
-        if (typeof debugLevel === 'undefined' || this.effectiveDebugLevel >= debugLevel) {
-            console.log('[' + process.hrtime.bigint() + idtext + '] ' + format(txt));
+            this.connectionName = connectionConfig.connectionName;
         }
     }
 
-    private doNothing(arg: string | number | boolean | (string | number | boolean)[]): string | number | boolean | (string | number | boolean)[] {
-        return arg;
+    private outputLog(txt: string | { [key: string]: any }, logLevel: number): void {
+        const idtext = ` [${this.connectionName}] `;
+        if (this.logLevel >= logLevel) {
+            console.log(new Date().toLocaleString() + idtext + format(txt));
+        }
     }
 
-    public setTranslationCB(variables: { [key: string]: any }): void {
-        Object.keys(variables).forEach((key): void => {
-            if (typeof variables[key] === 'undefined' || variables[key] === '') {
-                delete variables[key];
-            }
-        });
-        this.directionsTranslated = variables;
-        this.translationCB = (tag: string): any => {
-            if (this.directionsTranslated[tag]) {
-                return this.directionsTranslated[tag];
-            } else {
-                return tag;
-            }
-        };
+    private getTranslatedTag(tag: string): string {
+        if (this.directionsTranslated[tag]) {
+            return this.directionsTranslated[tag];
+        } else {
+            return tag;
+        }
     }
 
     private rejectAllRequestQueue(): void {
-        this.lastError = 'We detect a connection error, we are rejecting all request';
-        this.outputLog(this.lastError);
+        this.outputLog('We detect a connection error, we are rejecting all request', 2);
         for (let i = 0; i < this.requestQueue.length; i++) {
             if (this.requestQueue[i].action === 'read') {
                 const req = this.requestQueue[i].request as SendReadRequest;
                 for (let u = 0; u < req.requestList.length; u++) {
-                    (req.requestList[u].addresses[0].promiseReject as Function)(this.lastError);
+                    (req.requestList[u].addresses[0].promiseReject as (reason: string) => void)('We detect a connection error, we are rejecting all request');
                 }
             } else {
                 const req = this.requestQueue[i].request as SendWriteRequest;
-                (req.requestList[0].itemReference.address.promiseReject as Function)(this.lastError);
+                (req.requestList[0].itemReference.address.promiseReject as (reason: string) => void)('We detect a connection error, we are rejecting all request');
             }
         }
         this.requestQueue = [];
     }
 
     private stringToS7Addr(readOrWrite: 'read' | 'write', addr: string, useraddr: string): Address {
-        const address: Address = this.Address;
+        const address: Address = getEmptyAddress();
 
         const splitString = addr.split(',');
         if (splitString.length === 0 || splitString.length > 2) {
-            this.lastError = 'String Couldnt Split Properly';
-            this.outputLog(this.lastError);
-            address.valid = false;
-            return address;
+            this.outputLog(`String could not split properly, check your tag: ${addr}`, 1);
+            throw new Error(`String could not split properly, check your tag: ${addr}`);
         }
 
         if (splitString.length > 1) {
@@ -156,7 +166,7 @@ export class S7Comm {
             address.dataType = splitString2[0].replace(/[0-9]/gi, '').toUpperCase(); // Clear the numbers
             if (address.dataType === 'X' && splitString2.length === 3) {
                 address.arrayLength = parseInt(splitString2[2], 10); // Array of bits
-            } else if (address.dataType !== 'X' && splitString2.length === 2) {
+            } else if (address.dataType !== 'X' && address.dataType !== 'S' && splitString2.length === 2) {
                 address.arrayLength = parseInt(splitString2[1], 10); // Bit
             } else if ((address.dataType === 'S' || address.dataType === 'STRING') && splitString2.length === 3) {
                 address.dataTypeLength = parseInt(splitString2[1], 10) + 2; // With strings, add 2 to the length due to S7 header
@@ -168,10 +178,8 @@ export class S7Comm {
                 address.arrayLength = 1;
             }
             if (address.arrayLength <= 0) {
-                this.lastError = 'Zero length arrays not allowed, returning undefined';
-                this.outputLog(this.lastError);
-                address.valid = false;
-                return address;
+                this.outputLog(`Zero length arrays not allowed, check your tag: ${addr}`, 1);
+                throw new Error(`Zero length arrays not allowed, check your tag: ${addr}`);
             }
 
             // Get the data block number from the first part.
@@ -185,10 +193,8 @@ export class S7Comm {
             if (splitString2.length > 1 && address.dataType === 'X') {
                 address.bitOffset = parseInt(splitString2[1], 10);
                 if (isNaN(address.bitOffset) || address.bitOffset < 0 || address.bitOffset > 7) {
-                    this.lastError = 'Invalid bit offset specified for address ' + addr;
-                    this.outputLog(this.lastError);
-                    address.valid = false;
-                    return address;
+                    this.outputLog(`Invalid bit offset specified, check your tag: ${addr}`, 1);
+                    throw new Error(`Invalid bit offset specified, check your tag: ${addr}`);
                 }
             }
         } else {
@@ -386,10 +392,8 @@ export class S7Comm {
                     break;
 
                 default:
-                    this.lastError = 'Failed to find a match for ' + splitString2[0];
-                    this.outputLog(this.lastError);
-                    address.valid = false;
-                    return address;
+                    this.outputLog(`Failed to find a match for: ${splitString2[0]}`, 1);
+                    throw new Error(`Failed to find a match for: ${splitString2[0]}`);
             }
 
             address.bitOffset = 0;
@@ -413,10 +417,8 @@ export class S7Comm {
         }
 
         if (isNaN(address.offset) || address.offset < 0) {
-            this.lastError = 'Invalid byte offset specified for address ' + addr;
-            this.outputLog(this.lastError);
-            address.valid = false;
-            return address;
+            this.outputLog(`Invalid bit offset specified, check your tag: ${addr}`, 1);
+            throw new Error(`Invalid bit offset specified, check your tag: ${addr}`);
         }
 
         if (address.dataType === 'DI') {
@@ -456,10 +458,8 @@ export class S7Comm {
                 // For strings, arrayLength and dtypelen were assigned during parsing.
                 break;
             default:
-                this.lastError = 'Unknown data type ' + address.dataType;
-                this.outputLog(this.lastError);
-                address.valid = false;
-                return address;
+                this.outputLog(`Unknown data type: ${address.dataType}`, 1);
+                throw new Error(`Unknown data type: ${address.dataType}`);
         }
 
         // Default
@@ -493,10 +493,8 @@ export class S7Comm {
                 address.transportCode = 0x09;
                 break;
             default:
-                this.lastError = 'Unknown memory area ' + address.dataType;
-                this.outputLog(this.lastError);
-                address.valid = false;
-                return address;
+                this.outputLog(`Unknown memory area: ${address.dataType}`, 1);
+                throw new Error(`Unknown memory area: ${address.dataType}`);
         }
 
         if (address.dataType === 'X' && address.arrayLength === 1 && readOrWrite === 'write') {
@@ -510,51 +508,17 @@ export class S7Comm {
             address.byteLength = Math.ceil((address.bitOffset + address.arrayLength) / 8);
         } else {
             if (address.arrayLength === 0) {
-                this.lastError = 'Array length cannot be 0: ' + address.name;
-                this.outputLog(this.lastError);
-                address.valid = false;
-                return address;
+                this.outputLog(`Zero length arrays not allowed, check your tag: ${addr}`, 1);
+                throw new Error(`Zero length arrays not allowed, check your tag: ${addr}`);
             }
             address.byteLength = address.arrayLength * address.dataTypeLength;
         }
-
-        //	outputLog(' Arr lenght is ' + address.arrayLength + ' and DTL is ' + address.dtypelen);
 
         address.byteLengthWithFill = address.byteLength;
         if (address.byteLengthWithFill % 2) {
             address.byteLengthWithFill += 1;
         } // S7 will add a filler byte.  Use this expected reply length for PDU calculations.
         return address;
-    }
-
-    private stringArrayToS7AddressArray(items: string | string[], operation: 'write' | 'read'): Promise<Address[]> {
-        return new Promise<Address[]>((resolve, reject): void => {
-            this.outputLog('Adding ' + items, 0, this.connectionId);
-            const addresses: Address[] = [];
-            if (typeof items === 'string') {
-                let address = this.Address;
-                address = this.stringToS7Addr(operation, this.translationCB(items), items);
-                addresses.push(address);
-            } else if (Array.isArray(items)) {
-                for (let i = 0; i < items.length; i++) {
-                    if (typeof items[i] === 'string') {
-                        let address = this.Address;
-                        address = this.stringToS7Addr(operation, this.translationCB(items[i]), items[i]);
-                        addresses.push(address);
-                    }
-                }
-            }
-
-            // Validity check.
-            for (let i = 0; i < addresses.length; i++) {
-                if (!addresses[i].valid) {
-                    addresses.splice(i, 1);
-                    // this.outputLog('Dropping an undefined request item.', 0, this.connectionId);
-                    reject(new Error(this.lastError));
-                }
-            }
-            resolve(addresses);
-        });
     }
 
     private S7AddrToBuffer(address: Address, totalByteLength: number, totalByteLengthWithFill: number, totalOffset: number, isWriting: boolean): Buffer {
@@ -608,7 +572,7 @@ export class S7Comm {
         }
 
         if (s7Item.writeBuffer.length < s7Item.address.byteLengthWithFill) {
-            this.outputLog("Attempted to access part of the write buffer that wasn't there when writing an item.");
+            this.outputLog("Attempted to access part of the write buffer that wasn't there when writing an item.", 2);
         }
 
         newBuffer[0] = 0;
@@ -679,7 +643,7 @@ export class S7Comm {
                         writeBuffer.writeInt16BE((writeValue as number[])[arrayIndex], thePointer);
                         break;
                     default:
-                        this.outputLog('Unknown data type when preparing array write packet - should never happen.  Should have been caught earlier.  ' + address.dataType);
+                        this.outputLog('Unknown data type when preparing array write packet - should never happen.  Should have been caught earlier.  ' + address.dataType, 1);
                 }
                 if (address.dataType == 'X') {
                     // For bit arrays, we have to do some tricky math to get the pointer to equal the byte offset.
@@ -746,7 +710,7 @@ export class S7Comm {
                     writeBuffer.writeInt16BE(writeValue as number, thePointer);
                     break;
                 default:
-                    this.outputLog('Unknown data type in write prepare - should never happen.  Should have been caught earlier.  ' + address.dataType);
+                    this.outputLog('Unknown data type in write prepare - should never happen.  Should have been caught earlier.  ' + address.dataType, 1);
             }
             thePointer += address.dataTypeLength;
         }
@@ -844,7 +808,7 @@ export class S7Comm {
     }
 
     private isOptimizableArea(area: number): boolean {
-        if (this.doNotOptimize) {
+        if (!this.optimize) {
             return false;
         } // Are we skipping all optimization due to user request
         switch (area) {
@@ -867,34 +831,39 @@ export class S7Comm {
     }
 
     private packetTimeout(packetType: PacketTimeout, packetSeqNum?: number): void {
-        this.outputLog('PacketTimeout called with type ' + packetType + ' and seq ' + packetSeqNum, 1, this.connectionId);
+        this.outputLog('PacketTimeout called with type ' + packetType, 2);
         if (packetType === 'ISO') {
-            this.outputLog('TIMED OUT connecting to the PLC - Disconnecting', 0, this.connectionId);
-            this.outputLog('Wait for 2 seconds then try again.', 0, this.connectionId);
-            this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 0, this.connectionId);
-            clearTimeout(this.reconnectTimer as NodeJS.Timeout);
-            const timeHandler = (): void => {
-                this.outputLog('The scheduled reconnect from packetTimeout, connect type, is happening now', 0, this.connectionId);
-                this.connectionReset();
-            };
-            this.reconnectTimer = setTimeout(timeHandler, 2000);
+            this.outputLog('Timeout connecting to the PLC - Disconnecting', 2);
+            if (this.autoReconnect) {
+                this.outputLog('Wait for 2 seconds then try again', 2);
+                this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 3);
+                clearTimeout(this.reconnectTimer as NodeJS.Timeout);
+                const timeHandler = (): void => {
+                    this.outputLog('The scheduled reconnect from packetTimeout, connect type, is happening now', 3);
+                    this.connectionReset();
+                };
+                this.reconnectTimer = setTimeout(timeHandler, 2000);
+            }
             return;
         }
         if (packetType === 'PDU') {
-            this.outputLog('TIMED OUT waiting for PDU reply packet from PLC - Disconnecting');
-            this.outputLog('Wait for 2 seconds then try again.', 0, this.connectionId);
-            this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 0, this.connectionId);
-            clearTimeout(this.reconnectTimer as NodeJS.Timeout);
-            const timeHandler = (): void => {
-                this.outputLog('The scheduled reconnect from packetTimeout, PDU type, is happening now', 0, this.connectionId);
-                this.connectionReset();
-            };
-            this.reconnectTimer = setTimeout(timeHandler, 2000);
+            this.outputLog('timeout waiting for PDU reply packet from PLC - Disconnecting', 2);
+            if (this.autoReconnect) {
+                this.outputLog('Wait for 2 seconds then try again', 2);
+                this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 3);
+                clearTimeout(this.reconnectTimer as NodeJS.Timeout);
+                const timeHandler = (): void => {
+                    this.outputLog('The scheduled reconnect from packetTimeout, PDU type, is happening now', 3);
+                    this.connectionReset();
+                };
+                this.reconnectTimer = setTimeout(timeHandler, 2000);
+            }
             return;
         }
         if (packetType === 'read') {
-            this.outputLog('READ TIMEOUT on sequence number ' + packetSeqNum, 0, this.connectionId);
+            this.outputLog('Read timeout on sequence number ' + packetSeqNum, 2);
             this.isoConnectionState = 'disconnected';
+            this.emit('disconnected', 'Read timeout on sequence number ' + packetSeqNum);
             this.rejectAllRequestQueue();
             if (typeof packetSeqNum !== 'undefined') {
                 this.readResponse(undefined, this.findReadIndexOfSeqNum(packetSeqNum) as number);
@@ -902,16 +871,16 @@ export class S7Comm {
             return;
         }
         if (packetType === 'write') {
+            this.outputLog('Write timeout on sequence number ' + packetSeqNum, 2);
             this.isoConnectionState = 'disconnected';
+            this.emit('disconnected', 'Write timeout on sequence number ' + packetSeqNum);
             this.rejectAllRequestQueue();
-            this.outputLog('WRITE TIMEOUT on sequence number ' + packetSeqNum, 0, this.connectionId);
             if (typeof packetSeqNum !== 'undefined') {
                 this.writeResponse(undefined, this.findWriteIndexOfSeqNum(packetSeqNum) as number);
             }
             return;
         }
-        this.outputLog("Unknown timeout error.  Nothing was done - this shouldn't happen.");
-        this.lastError = "Unknown timeout error.  Nothing was done - this shouldn't happen.";
+        this.outputLog('Unknown timeout error. Nothing was done - this should not happen', 1);
     }
 
     private connectionReset(): void {
@@ -919,25 +888,24 @@ export class S7Comm {
         if (this.client) {
             this.client.destroy();
         }
-        if (!this.isWaiting()) {
+        if (this.autoReconnect && !this.isWaiting()) {
             this.connectNow();
         }
     }
 
     private connectError(err: Error): void {
-        // Note that the first time we are connecting we call the connectCallback, then after that, we reconnect again on a connection error
         this.isoConnectionState = 'disconnected';
-        this.outputLog('We Caught a connect error: ' + err.message, 0, this.connectionId);
+        this.outputLog('We caught a connect error: ' + err.message, 1);
         this.connectionReset();
     }
 
     private readWriteError(err: Error): void {
-        this.outputLog('We Caught a read/write error ' + err.message + ' - will CLOSE the connection');
+        this.outputLog('We Caught a read/write error ' + err.message + ' - will CLOSE the connection', 1);
         this.isoConnectionState = 'disconnected';
     }
 
     private connectionCleanup(): void {
-        this.outputLog('Connection cleanup is happening');
+        this.outputLog('Connection cleanup is happening', 3);
         if (typeof this.client !== 'undefined') {
             // destroying the socket connection
             this.client.destroy();
@@ -945,38 +913,28 @@ export class S7Comm {
             this.client.removeAllListeners('error');
             this.client.removeAllListeners('close');
             this.client.on('error', (): void => {
-                this.outputLog('TCP socket error following connection cleanup');
+                this.outputLog('TCP socket error following connection cleanup', 1);
             });
         }
         clearTimeout(this.connectTimeout as NodeJS.Timeout);
         clearTimeout(this.PDUTimeout as NodeJS.Timeout);
     }
 
-    private findReadIndexOfSeqNum(seqNum: number): number | undefined {
-        for (let packetCounter = 0; packetCounter < this.sentReadPacketArray.length; packetCounter++) {
-            if (this.sentReadPacketArray[packetCounter].seqNum == seqNum) {
-                return packetCounter;
-            }
-        }
-        return undefined;
+    private findReadIndexOfSeqNum(seqNum: number): number {
+        return this.sentReadPacketArray.findIndex((sentReadPacket) => {
+            return sentReadPacket.seqNum == seqNum;
+        });
     }
 
-    private findWriteIndexOfSeqNum(seqNum: number): number | undefined {
-        for (let packetCounter = 0; packetCounter < this.sentWritePacketArray.length; packetCounter++) {
-            if (this.sentWritePacketArray[packetCounter].seqNum == seqNum) {
-                return packetCounter;
-            }
-        }
-        return undefined;
+    private findWriteIndexOfSeqNum(seqNum: number): number {
+        return this.sentWritePacketArray.findIndex((sentWritePacket) => {
+            return sentWritePacket.seqNum == seqNum;
+        });
     }
 
     private validateWriteResponse(theData: Buffer | undefined, theItem: S7ItemWrite, thePointer: number): number {
-        let errMessage: string = '';
-
         if (!theData) {
-            errMessage = 'Timeout write error.';
-            this.lastError = errMessage;
-            this.outputLog(theItem.errCode);
+            this.outputLog('Timeout write error', 1);
             theItem.validResponseBuffer = false;
             return 0;
         }
@@ -985,9 +943,7 @@ export class S7Comm {
 
         if (remainingLength < 1) {
             theItem.validResponseBuffer = false;
-            errMessage = 'Malformed Packet - Less Than 1 Byte.';
-            this.lastError = errMessage;
-            this.outputLog(errMessage);
+            this.outputLog('Malformed packet - less than 1 byte', 1);
             return 0; // Hard to increment the pointer so we call it a malformed packet and we're done.
         }
 
@@ -995,9 +951,7 @@ export class S7Comm {
         theItem.writeResponse = writeResponse;
 
         if (writeResponse !== 0xff) {
-            errMessage = 'Received write error of ' + theItem.writeResponse + ' on ' + theItem.address.name;
-            this.outputLog(errMessage);
-            this.lastError = errMessage;
+            this.outputLog(`Received write error of ${theItem.writeResponse} on ${theItem.address.name}`, 1);
             theItem.validResponseBuffer = false;
         } else {
             theItem.validResponseBuffer = true;
@@ -1007,11 +961,10 @@ export class S7Comm {
 
     private validateReadResponse(theData: Buffer | undefined, request: ReadBlock, thePointer: number): { thePointer: number; bufferResponse: Buffer | undefined } {
         let remainingLength;
-        let errMessage: string | undefined = undefined;
 
         if (typeof theData === 'undefined') {
             remainingLength = 0;
-            this.outputLog('Processing an undefined packet, likely due to timeout error');
+            this.outputLog('Processing an undefined packet, likely due to timeout error', 1);
         } else {
             remainingLength = theData.length - thePointer; // Say if length is 39 and pointer is 35 we can access 35,36,37,38 = 4 bytes.
         }
@@ -1019,12 +972,10 @@ export class S7Comm {
         const prePointer = thePointer;
         if (remainingLength < 4) {
             if (typeof theData !== 'undefined') {
-                errMessage = 'Malformed Packet - Less Than 4 Bytes.';
+                this.outputLog('Malformed Packet - Less Than 4 Bytes', 1);
             } else {
-                errMessage = 'Timeout error - zero length packet';
+                this.outputLog('Timeout error - zero length packet', 1);
             }
-            this.lastError = errMessage;
-            this.outputLog(errMessage);
             return { thePointer: 0, bufferResponse: undefined };
         }
 
@@ -1039,35 +990,27 @@ export class S7Comm {
         const transportCode = (theData as Buffer)[thePointer + 1];
 
         if (remainingLength == reportedDataLength + 2) {
-            this.outputLog('Not last part.');
+            this.outputLog('Not last part.', 1);
         }
         if (remainingLength < reportedDataLength + 2) {
-            errMessage = 'Malformed Packet - Item Data Length and Packet Length Disagree.  RDL+2 ' + (reportedDataLength + 2) + ' remainingLength ' + remainingLength;
-            this.outputLog(errMessage);
-            this.lastError = errMessage;
+            this.outputLog(`Malformed packet - Item data length and packet length disagree. RDL+2 ${reportedDataLength + 2} remainingLength: ${remainingLength}`, 1);
             return { thePointer: 0, bufferResponse: undefined };
         }
 
         if (responseCode !== 0xff) {
-            errMessage = 'Invalid Response Code - ' + responseCode;
-            this.outputLog(errMessage);
-            this.lastError = errMessage;
+            this.outputLog(`Invalid response code - ${responseCode}`, 1);
             return { thePointer: thePointer + reportedDataLength + 4, bufferResponse: undefined };
         }
 
         if (transportCode !== request.addresses[0].transportCode) {
-            errMessage = 'Invalid Transport Code - ' + transportCode;
-            this.outputLog(errMessage);
-            this.lastError = errMessage;
+            this.outputLog(`Invalid transport code - ${transportCode}`, 1);
             return { thePointer: thePointer + reportedDataLength + 4, bufferResponse: undefined };
         }
 
         const expectedLength = request.totalbyteLength;
 
         if (reportedDataLength !== expectedLength) {
-            errMessage = 'Invalid Response Length - Expected ' + expectedLength + ' but got ' + reportedDataLength + ' bytes.';
-            this.outputLog(errMessage);
-            this.lastError = errMessage;
+            this.outputLog(`Invalid response length - expected ${expectedLength} but got ${reportedDataLength} bytes`, 1);
             return { thePointer: reportedDataLength + 2, bufferResponse: undefined };
         }
 
@@ -1157,7 +1100,7 @@ export class S7Comm {
                         break;
 
                     default:
-                        this.outputLog('Unknown data type in response - should never happen.  Should have been caught earlier.  ' + address.dataType);
+                        this.outputLog('Unknown data type in response - should never happen.  Should have been caught earlier.  ' + address.dataType, 1);
                         return 0;
                 }
 
@@ -1228,7 +1171,7 @@ export class S7Comm {
                         readValue = buffer.readInt16BE(thePointer);
                         break;
                     default:
-                        this.outputLog('Unknown data type in response - should never happen.  Should have been caught earlier.  ' + address.dataType);
+                        this.outputLog('Unknown data type in response - should never happen.  Should have been caught earlier.  ' + address.dataType, 1);
                         return 0;
                 }
             }
@@ -1245,42 +1188,36 @@ export class S7Comm {
     }
 
     private checkReadResponseParts(readRequestSequence: number): boolean {
-        for (let i = 0; i < this.sentReadPacketArray.length; i++) {
-            if (this.sentReadPacketArray[i].readRequestSequence === readRequestSequence) {
-                if (this.sentReadPacketArray[i].rcvd === false) {
-                    return false;
-                }
-            }
-        }
-        return true;
+        // Check in array of sentReadPacketArray if we received all parts of the same sequence
+        const waitingReadPackets = this.sentReadPacketArray.filter((sentReadPacket) => {
+            return sentReadPacket.readRequestSequence === readRequestSequence && !sentReadPacket.rcvd;
+        });
+        return !!waitingReadPackets.length;
     }
 
     private checkWriteResponseParts(writeRequestSequence: number): boolean {
-        for (let i = 0; i < this.sentWritePacketArray.length; i++) {
-            if (this.sentWritePacketArray[i].writeRequestSequence === writeRequestSequence) {
-                if (this.sentWritePacketArray[i].rcvd === false) {
-                    return false;
-                }
-            }
-        }
-        return true;
+        // Check in array of sentWritePacketArray if we received all parts of the same sequence
+        const waitingWritePackets = this.sentWritePacketArray.filter((sentWritePacket) => {
+            return sentWritePacket.writeRequestSequence === writeRequestSequence && !sentWritePacket.rcvd;
+        });
+        return !!waitingWritePackets.length;
     }
 
     private readResponse(data: Buffer | undefined, foundSeqIndex: number): void {
-        this.outputLog('Read response called', 1, this.connectionId);
+        this.outputLog('Read response called', 3);
 
         // Make a note of the time it took the PLC to process the request.
-        this.outputLog('Received in ' + (process.hrtime.bigint() - this.sentReadPacketArray[foundSeqIndex].reqTime) + ' nanoseconds', 0, this.connectionId);
+        this.outputLog('Received in ' + (process.hrtime.bigint() - this.sentReadPacketArray[foundSeqIndex].reqTime) + ' nanoseconds', 3);
 
         clearTimeout(this.sentReadPacketArray[foundSeqIndex].timeout);
 
         if (!this.sentReadPacketArray[foundSeqIndex].sent) {
-            this.outputLog('WARNING: Received a read response packet that was not marked as sent', 0, this.connectionId);
+            this.outputLog('Warning: Received a read response packet that was not marked as sent', 2);
             return;
         }
 
         if (this.sentReadPacketArray[foundSeqIndex].rcvd) {
-            this.outputLog('WARNING: Received a read response packet that was already marked as received', 0, this.connectionId);
+            this.outputLog('Warning: Received a read response packet that was already marked as received', 2);
             return;
         }
 
@@ -1296,7 +1233,7 @@ export class S7Comm {
             dataPointer = thePointer;
             this.sentReadPacketArray[foundSeqIndex].requestList[i].responseBuffer = bufferResponse;
             if (!dataPointer) {
-                this.outputLog('Received a ZERO RESPONSE Processing Read Packet due to unrecoverable packet error', 0, this.connectionId);
+                this.outputLog('Received a zero response processing read packet due to unrecoverable packet error', 1);
                 break;
             }
         }
@@ -1308,11 +1245,11 @@ export class S7Comm {
                     let offset = 0;
                     const buffer: Buffer = (this.sentReadPacketArray[foundSeqIndex].requestList[i].responseBuffer as Buffer).slice(offset, this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].byteLength + offset);
                     const value = this.BufferToAddressValue(this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0], buffer);
-                    this.outputLog('Address ' + this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].userName + ' has value ' + value, 1, this.connectionId);
+                    this.outputLog(`Tag ${this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].userName} has value: ${value}`, 3);
 
                     const result: { [key: string]: any } = {};
                     result[this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].userName] = value;
-                    (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseResolve as Function)(result);
+                    (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseResolve as any)(result);
 
                     for (let u = 1; u < this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses.length; u++) {
                         const pastOffset = this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u - 1].offset;
@@ -1323,19 +1260,18 @@ export class S7Comm {
 
                         const buffer: Buffer = (this.sentReadPacketArray[foundSeqIndex].requestList[i].responseBuffer as Buffer).slice(offset, this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].byteLength + offset);
                         const value = this.BufferToAddressValue(this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u], buffer);
-                        this.outputLog('Address ' + this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].userName + ' has value ' + value, 1, this.connectionId);
+                        this.outputLog(`Tag ${this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].userName} has value: ${value}`, 3);
 
                         const result: { [key: string]: any } = {};
                         result[this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].userName] = value;
-                        (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].promiseResolve as Function)(result);
+                        (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].promiseResolve as (result: { [key: string]: any }) => void)(result);
                     }
                 } else {
-                    for (let u = 0; u < this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses.length; u++) {
-                        (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseReject as Function)(this.lastError);
-                    }
+                    this.outputLog(`Error trying to read in ${this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].userName}. Rejecting promise`, 3);
+                    (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseReject as (reason: string) => void)('Timeout');
                 }
             }
-        } else if (this.sentReadPacketArray[foundSeqIndex].requestList[0].parts > 1 && this.checkReadResponseParts(this.sentReadPacketArray[foundSeqIndex].readRequestSequence as number)) {
+        } else if (this.sentReadPacketArray[foundSeqIndex].requestList[0].parts > 1 && this.checkReadResponseParts(this.sentReadPacketArray[foundSeqIndex].readRequestSequence)) {
             // If the sentReadPacket have two or more parts and are already received
             let validResponse: boolean = true;
             const buffer: Buffer = Buffer.alloc(this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].dataTypeLength);
@@ -1352,18 +1288,21 @@ export class S7Comm {
 
             if (validResponse) {
                 const value = this.BufferToAddressValue(this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0], buffer);
-                this.outputLog('Address ' + this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].userName + ' has value ' + value, 1, this.connectionId);
-
+                this.outputLog('Address ' + this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].userName + ' has value ' + value, 3);
                 const result: { [key: string]: any } = {};
                 result[this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].userName] = value;
-
-                (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseResolve as Function)(result);
+                (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseResolve as (result: { [key: string]: any }) => void)(result);
             } else {
-                (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseReject as Function)();
+                this.outputLog(`Error trying to read in ${this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.name}. Rejecting promise...`, 3);
+                if (data) {
+                    (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseReject as (reason: string) => void)('Invalid response');
+                } else {
+                    (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseReject as (reason: string) => void)('Timeout');
+                }
             }
         } else {
             // we must wait until other parts comming for check
-            this.outputLog('Wait for parts of read request part' + this.sentReadPacketArray[foundSeqIndex].readRequestSequence, 1, this.connectionId);
+            this.outputLog(`Wait for parts of read request with sequence ${this.sentWritePacketArray[foundSeqIndex].writeRequestSequence}`, 3);
             canDeletePackets = false;
         }
 
@@ -1383,10 +1322,10 @@ export class S7Comm {
     }
 
     private writeResponse(data: Buffer | undefined, foundSeqIndex: number): void {
-        this.outputLog('Write response called', 1, this.connectionId);
+        this.outputLog('WriteResponse called', 3);
 
         // Make a note of the time it took the PLC to process the request.
-        this.outputLog('Received in ' + (process.hrtime.bigint() - this.sentWritePacketArray[foundSeqIndex].reqTime) + ' nanoseconds', 0, this.connectionId);
+        this.outputLog('Received in ' + (process.hrtime.bigint() - this.sentWritePacketArray[foundSeqIndex].reqTime) + ' nanoseconds', 3);
 
         clearTimeout(this.sentWritePacketArray[foundSeqIndex].timeout);
 
@@ -1401,46 +1340,52 @@ export class S7Comm {
         for (let itemCount = 0; itemCount < this.sentWritePacketArray[foundSeqIndex].requestList.length; itemCount++) {
             dataPointer = this.validateWriteResponse(data, this.sentWritePacketArray[foundSeqIndex].requestList[itemCount].itemReference, dataPointer);
             if (!dataPointer) {
-                this.outputLog('Stopping Processing Write Response Packet due to unrecoverable packet error');
+                this.outputLog('Stopping processing write response packet due to unrecoverable packet error', 1);
                 break;
             }
         }
 
         let canDeletePackets: boolean = true;
 
-        // If the sentReadPacket have only one part, we can continue to check values
+        // If the sentWritePacket have only one part, we can continue to check values
         if (this.sentWritePacketArray[foundSeqIndex].requestList[0].parts === 1) {
             for (let i = 0; i < this.sentWritePacketArray[foundSeqIndex].requestList.length; i++) {
-                this.outputLog(this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.name + ' write completed with quality ' + this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.validResponseBuffer, 1, this.connectionId);
                 if (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.validResponseBuffer) {
+                    this.outputLog(this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.name + ' write completed succesfully', 3);
                     const result: { [key: string]: any } = {};
                     result[this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.userName] = this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.writeValue;
-                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseResolve as Function)(result);
+                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseResolve as (result: { [key: string]: any }) => void)(result);
                 } else {
-                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseReject as Function)();
+                    this.outputLog(`Error trying to write in ${this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.name}. Rejecting promise`, 3);
+                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseReject as (reason: string) => void)('Timeout');
                 }
             }
-        } else if (this.sentWritePacketArray[foundSeqIndex].requestList[0].parts > 1 && this.checkWriteResponseParts(this.sentWritePacketArray[foundSeqIndex].writeRequestSequence as number)) {
-            // If the sentReadPacket have two or more parts and are already received
+        } else if (this.sentWritePacketArray[foundSeqIndex].requestList[0].parts > 1 && this.checkWriteResponseParts(this.sentWritePacketArray[foundSeqIndex].writeRequestSequence)) {
+            // If the sentWritePacket have two or more parts and are already received
             let validResponse: boolean = true;
             const writeRequestSequence: number = this.sentWritePacketArray[foundSeqIndex].requestList[0].writeRequestSequence;
             for (let i = 0; i < this.sentWritePacketArray.length; i++) {
                 if (this.sentWritePacketArray[i].writeRequestSequence === writeRequestSequence) {
-                    this.outputLog(this.sentWritePacketArray[i].requestList[0].itemReference.address.name + ' write completed with quality ' + this.sentWritePacketArray[i].requestList[0].itemReference.validResponseBuffer, 1, this.connectionId);
                     validResponse = this.sentWritePacketArray[i].requestList[0].itemReference.validResponseBuffer;
                 }
             }
 
             if (validResponse) {
+                this.outputLog(this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.name + ' write completed succesfully', 3);
                 const result: { [key: string]: any } = {};
                 result[this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.userName] = this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.writeValue;
-                (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseResolve as Function)(result);
+                (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseResolve as (result: { [key: string]: any }) => void)(result);
             } else {
-                (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseReject as Function)();
+                this.outputLog(`Error trying to write in ${this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.name}. Rejecting promise...`, 3);
+                if (data) {
+                    (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseReject as (reason: string) => void)('Invalid response');
+                } else {
+                    (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseReject as (reason: string) => void)('Timeout');
+                }
             }
         } else {
             // we must wait until other parts comming for check
-            this.outputLog('Wait for parts of write request part ' + this.sentWritePacketArray[foundSeqIndex].writeRequestSequence, 0, this.connectionId);
+            this.outputLog(`Wait for parts of write request with sequence ${this.sentWritePacketArray[foundSeqIndex].writeRequestSequence}`, 3);
             canDeletePackets = false;
         }
         if (canDeletePackets) {
@@ -1455,6 +1400,100 @@ export class S7Comm {
             this.rejectAllRequestQueue();
             // reconnect
             this.connectionReset();
+        }
+    }
+
+    private onResponse(theData: Buffer): void {
+        // Packet Validity Check.  Note that this will pass even with a "not available" response received from the server.
+        // For length calculation and verification:
+        // data[4] = COTP header length. Normally 2.  This doesn't include the length byte so add 1.
+        // read(13) is parameter length.  Normally 4.
+        // read(14) is data length.  (Includes item headers)
+        // 12 is length of "S7 header"
+        // Then we need to add 4 for TPKT header.
+
+        if (!(theData && theData.length > 6)) {
+            this.outputLog('INVALID READ RESPONSE - DISCONNECTING', 1);
+            this.outputLog("The incoming packet doesn't have the required minimum length of 7 bytes", 1);
+            this.outputLog(theData, 3);
+            return;
+        }
+
+        const data = this.checkRfcData(theData);
+        if (data === 'fastACK') {
+            //read again and wait for the requested data
+            this.outputLog('Fast Acknowledge received.', 3);
+            this.client.removeAllListeners('error');
+            this.client.removeAllListeners('data');
+            this.client.on('data', (data: Buffer): void => {
+                this.onResponse(data);
+            });
+            this.client.on('error', (): void => {
+                this.readWriteError(new Error('Error onisoclient, onReadResponse1'));
+            });
+        } else if (data instanceof Buffer && data[7] === 0x32) {
+            //check the validy of FA+S7 package
+
+            //*********************   VALIDY CHECK ***********************************
+            //TODO: Check S7-Header properly
+            if (data.length > 8 && data[8] != 3) {
+                this.outputLog('PDU type (byte 8) was returned as ' + data[8] + ' where the response PDU of 3 was expected.', 1);
+                this.outputLog('Maybe you are requesting more than 240 bytes of data in a packet?', 1);
+                this.outputLog(data, 3);
+                this.connectionReset();
+                return;
+            }
+            // The smallest read packet will pass a length check of 25.  For a 1-item write response with no data, length will be 22.
+            if (data.length > data.readInt16BE(2)) {
+                this.outputLog('An oversize packet was detected.  Excess length is ' + (data.length - (data as Buffer).readInt16BE(2)) + '.', 2);
+                this.outputLog('We assume this is because two packets were sent at nearly the same time by the PLC.', 2);
+                this.outputLog('We are slicing the buffer and scheduling the second half for further processing next loop.', 2);
+                setTimeout((): void => {
+                    this.onResponse(data.slice(data.readInt16BE(2)));
+                }, 0); // This re-triggers this same function with the sliced-up buffer.
+            }
+
+            if (data.length < data.readInt16BE(2) || data.readInt16BE(2) < 22 || data[5] !== 0xf0 || data[4] + 1 + 12 + 4 + data.readInt16BE(13) + data.readInt16BE(15) !== data.readInt16BE(2) || !(data[6] >> 7) || data[7] !== 0x32 || data[8] !== 3) {
+                this.outputLog('INVALID READ RESPONSE - DISCONNECTING', 1);
+                this.outputLog('TPKT Length From Header is ' + data.readInt16BE(2) + ' and RCV buffer length is ' + data.length + ' and COTP length is ' + (data as Buffer).readUInt8(4) + ' and data[6] is ' + data[6], 1);
+                this.outputLog(data, 1);
+                this.connectionReset();
+                return;
+            }
+
+            //**********************   GO ON  **********************
+            // Log the receive
+            this.outputLog('Received ' + data.readUInt16BE(15) + ' bytes of S7comm from PLC.  Sequence number is ' + data.readUInt16BE(11), 3);
+            this.outputLog(data, 3);
+
+            // Check the sequence number
+            let packetIndex: number = -1;
+
+            if (data[19] === 0x05) {
+                // write response
+                packetIndex = this.findWriteIndexOfSeqNum(data.readUInt16BE(11));
+                if (packetIndex >= 0) {
+                    this.writeResponse(data, packetIndex);
+                }
+            } else if (data[19] === 0x04) {
+                // read response
+                packetIndex = this.findReadIndexOfSeqNum(data.readUInt16BE(11));
+                if (packetIndex >= 0) {
+                    this.readResponse(data, packetIndex);
+                }
+            }
+
+            if (packetIndex === -1) {
+                this.outputLog("Sequence number that arrived wasn't a valid reply... dropping", 2);
+                this.outputLog(data, 3);
+                return;
+            }
+        } else {
+            this.outputLog('INVALID READ RESPONSE - DISCONNECTING', 1);
+            this.outputLog('TPKT Length From Header is ' + theData.readInt16BE(2) + ' and RCV buffer length is ' + theData.length + ' and COTP length is ' + theData.readUInt8(4) + ' and data[6] is ' + theData[6], 3);
+            this.outputLog(theData, 3);
+            this.connectionReset();
+            return;
         }
     }
 
@@ -1487,31 +1526,39 @@ export class S7Comm {
         return ret;
     }
 
-    private onPDUReply(theData: Buffer): void {
-        (this.client as Socket).removeAllListeners('error');
+    private initS7commListeners() {
+        this.outputLog('S7comm connected', 3);
+        this.client.on('data', (data: Buffer): void => {
+            this.onResponse(data);
+        });
+        this.client.on('error', (): void => {
+            this.readWriteError(new Error('Error on client 2, onPDUReply function'));
+        });
+    }
 
-        clearTimeout(this.PDUTimeout as NodeJS.Timeout);
-
+    private async onPDUReply(theData: Buffer): Promise<void> {
         const data = this.checkRfcData(theData);
         if (data === 'fastACK') {
             //Read again and wait for the requested data
-            this.outputLog('Fast Acknowledge received.', 0, this.connectionId);
+            this.outputLog('Fast Acknowledge received.', 3);
 
-            (this.client as Socket).removeAllListeners('error');
+            this.client.removeAllListeners('error');
+            this.client.removeAllListeners('data');
 
-            (this.client as Socket).removeAllListeners('data');
-
-            (this.client as Socket).once('data', (data: Buffer): void => {
+            this.client.once('data', (data: Buffer): void => {
+                this.client.removeAllListeners('error');
                 this.onPDUReply(data);
             });
 
-            (this.client as Socket).on('error', (err: Error): void => {
-                console.log(err);
-                this.readWriteError(new Error('Error on PDURefly'));
+            this.client.on('error', (err: Error): void => {
+                const error = new Error('Error on PDU reply. ' + err);
+                this.readWriteError(error);
+                throw error;
             });
         } else if (data instanceof Buffer && data[4] + 1 + 12 + data.readInt16BE(13) === data.readInt16BE(2) - 4) {
-            //valid the length of FA+S7 package :  ISO_Length+ISO_LengthItself+S7Com_Header+S7Com_Header_ParameterLength===TPKT_Length-4
-            //Everything OK...go on
+            // Valid the length of FA+S7 package :  ISO_Length+ISO_LengthItself+S7Com_Header+S7Com_Header_ParameterLength===TPKT_Length-4
+            // Everything OK...go on
+
             // Track the connection state
             this.isoConnectionState = 's7comm'; // Received PDU response, good to go
 
@@ -1532,227 +1579,160 @@ export class S7Comm {
             } else {
                 this.maxPDU = this.requestMaxPDU;
             }
-            this.outputLog('Received PDU Response - Proceeding with PDU ' + this.maxPDU + ' and ' + this.maxParallel + ' max parallel connections.', 0, this.connectionId);
-            (this.client as Socket).on('data', (data: Buffer): void => {
-                this.onResponse(data);
-            });
-            (this.client as Socket).on('error', (): void => {
-                this.readWriteError(new Error('Error on client 2, onPDUReply function'));
-            });
-
-            if (!this.connectCBIssued && typeof this.connectCallback === 'function') {
-                this.connectCBIssued = true;
-                this.connectCallback();
-            }
+            this.outputLog('Received PDU response. Proceeding with PDU: ' + this.maxPDU + ' and ' + this.maxParallel + ' max parallel connections.', 3);
         } else {
-            this.outputLog('INVALID Telegram ', 0, this.connectionId);
-            this.outputLog('Byte 0 From Header is ' + theData[0] + ' it has to be 0x03, Byte 5 From Header is  ' + theData[5] + ' and it has to be 0x0F ', 0, this.connectionId);
-            this.outputLog('INVALID PDU RESPONSE or CONNECTION REFUSED - DISCONNECTING', 0, this.connectionId);
-            this.outputLog('TPKT Length From Header is ' + theData.readInt16BE(2) + ' and RCV buffer length is ' + theData.length + ' and COTP length is ' + theData.readUInt8(4) + ' and data[6] is ' + theData[6], 0, this.connectionId);
-            this.outputLog(theData);
-            const timeHandler = (): void => {
+            this.outputLog('Invalid PDU response or connection refused. Discconecting', 1);
+            this.outputLog('Ivalid Telegram ', 3);
+            this.outputLog('Byte 0 from header is ' + theData[0] + ' it has to be 0x03, byte 5 from header is  ' + theData[5] + ' and it has to be 0x0F ', 3);
+            this.outputLog('TPKT length from header is ' + theData.readInt16BE(2) + ' and buffer length is ' + theData.length + ' and COTP length is ' + theData.readUInt8(4) + ' and data[6] is ' + theData[6], 3);
+            this.outputLog(theData, 3);
+
+            if (this.autoReconnect) {
+                clearTimeout(this.reconnectTimer as NodeJS.Timeout);
+                const timeHandler = (): void => {
+                    this.connectionReset();
+                };
+                this.reconnectTimer = setTimeout(timeHandler, 2000);
+            } else {
                 this.connectionReset();
-            };
-            (this.client as Socket).destroy();
-            clearTimeout(this.reconnectTimer as NodeJS.Timeout);
-            this.reconnectTimer = setTimeout(timeHandler, 2000);
+            }
+            return Promise.reject('Invalid response on PDU reply');
         }
     }
 
-    private onResponse(theData: Buffer): void {
-        // Packet Validity Check.  Note that this will pass even with a "not available" response received from the server.
-        // For length calculation and verification:
-        // data[4] = COTP header length. Normally 2.  This doesn't include the length byte so add 1.
-        // read(13) is parameter length.  Normally 4.
-        // read(14) is data length.  (Includes item headers)
-        // 12 is length of "S7 header"
-        // Then we need to add 4 for TPKT header.
+    private async initPDUConnect(): Promise<Buffer> {
+        return new Promise((resolve, reject) => {
+            const timeHandler = (): void => {
+                this.packetTimeout('PDU');
+                this.emit('connect-timeout');
+            };
+            this.PDUTimeout = setTimeout(timeHandler, this.connectionTimeout);
 
-        if (!(theData && theData.length > 6)) {
-            this.outputLog('INVALID READ RESPONSE - DISCONNECTING');
-            this.outputLog("The incoming packet doesn't have the required minimum length of 7 bytes");
-            this.outputLog(theData);
-            return;
-        }
-
-        const data = this.checkRfcData(theData);
-        if (data === 'fastACK') {
-            //read again and wait for the requested data
-            this.outputLog('Fast Acknowledge received.', 0, this.connectionId);
-            (this.client as Socket).removeAllListeners('error');
-            (this.client as Socket).removeAllListeners('data');
-            (this.client as Socket).on('data', (data: Buffer): void => {
-                this.onResponse(data);
+            this.client.once('data', (data: Buffer): void => {
+                clearTimeout(this.PDUTimeout as NodeJS.Timeout);
+                this.client.removeAllListeners('error');
+                resolve(data);
             });
-            (this.client as Socket).on('error', (): void => {
-                this.readWriteError(new Error('Error onisoclient, onReadResponse1'));
+
+            this.client.on('error', (err: Error): void => {
+                const error = new Error('Error on PDU negotiation. ' + err);
+                this.readWriteError(error);
+                this.connectError(error);
+                reject(error);
             });
-        } else if (data instanceof Buffer && data[7] === 0x32) {
-            //check the validy of FA+S7 package
 
-            //*********************   VALIDY CHECK ***********************************
-            //TODO: Check S7-Header properly
-            if (data.length > 8 && data[8] != 3) {
-                this.outputLog('PDU type (byte 8) was returned as ' + data[8] + ' where the response PDU of 3 was expected.');
-                this.outputLog('Maybe you are requesting more than 240 bytes of data in a packet?');
-                this.outputLog(data);
-                this.connectionReset();
-                return;
-            }
-            // The smallest read packet will pass a length check of 25.  For a 1-item write response with no data, length will be 22.
-            if (data.length > data.readInt16BE(2)) {
-                this.outputLog('An oversize packet was detected.  Excess length is ' + (data.length - (data as Buffer).readInt16BE(2)) + '.  ');
-                this.outputLog('We assume this is because two packets were sent at nearly the same time by the PLC.');
-                this.outputLog('We are slicing the buffer and scheduling the second half for further processing next loop.');
-                setTimeout((): void => {
-                    this.onResponse(data.slice(data.readInt16BE(2)));
-                }, 0); // This re-triggers this same function with the sliced-up buffer.
-            }
-
-            if (data.length < data.readInt16BE(2) || data.readInt16BE(2) < 22 || data[5] !== 0xf0 || data[4] + 1 + 12 + 4 + data.readInt16BE(13) + data.readInt16BE(15) !== data.readInt16BE(2) || !(data[6] >> 7) || data[7] !== 0x32 || data[8] !== 3) {
-                this.outputLog('INVALID READ RESPONSE - DISCONNECTING');
-                this.outputLog('TPKT Length From Header is ' + data.readInt16BE(2) + ' and RCV buffer length is ' + data.length + ' and COTP length is ' + (data as Buffer).readUInt8(4) + ' and data[6] is ' + data[6]);
-                this.outputLog(data);
-                this.connectionReset();
-                return;
-            }
-
-            //**********************   GO ON  *************************
-            // Log the receive
-            this.outputLog('Received ' + data.readUInt16BE(15) + ' bytes of S7-data from PLC.  Sequence number is ' + data.readUInt16BE(11), 0, this.connectionId);
-
-            // Check the sequence number
-            let foundSeqNum: number | undefined = undefined;
-            let isReadResponse: boolean = false;
-            let isWriteResponse: boolean = false;
-
-            if (data[19] === 0x05) {
-                // write response
-                foundSeqNum = this.findWriteIndexOfSeqNum(data.readUInt16BE(11));
-                if (typeof foundSeqNum !== 'undefined') {
-                    this.writeResponse(data, foundSeqNum);
-                    isWriteResponse = true;
-                }
-            } else if (data[19] === 0x04) {
-                // read response
-                foundSeqNum = this.findReadIndexOfSeqNum(data.readUInt16BE(11));
-                if (typeof foundSeqNum !== 'undefined') {
-                    this.readResponse(data, foundSeqNum);
-                    isReadResponse = true;
-                }
-            }
-
-            if (!isReadResponse && !isWriteResponse) {
-                this.outputLog("Sequence number that arrived wasn't a write reply either - dropping");
-                this.outputLog(data);
-                return;
-            }
-        } else {
-            this.outputLog('INVALID READ RESPONSE - DISCONNECTING');
-            this.outputLog('TPKT Length From Header is ' + theData.readInt16BE(2) + ' and RCV buffer length is ' + theData.length + ' and COTP length is ' + theData.readUInt8(4) + ' and data[6] is ' + theData[6]);
-            this.outputLog(theData);
-            this.connectionReset();
-            return;
-        }
+            this.client.write(this.negotiatePDU.slice(0, 25));
+        });
     }
 
     private onISOConnectReply(data: Buffer): void {
-        (this.client as Socket).removeAllListeners('error');
-
-        clearTimeout(this.connectTimeout as NodeJS.Timeout);
-
-        // ignore if we're not expecting it - prevents write after end exception as of #80
-        if (this.isoConnectionState != 'tcp') {
-            this.outputLog('Ignoring ISO connect reply, expecting isoConnectionState of 2, is currently ' + this.isoConnectionState, 0, this.connectionId);
+        // Ignore if we're not expecting it
+        if (this.isoConnectionState !== 'tcp') {
+            this.outputLog('Ignoring ISO connect reply, expecting isoConnectionState of tcp, is currently ' + this.isoConnectionState, 2);
             return;
         }
-
-        // Track the connection state
-        this.isoConnectionState = 'isoOnTcp'; // ISO-ON-TCP connected, Wait for PDU response.
 
         // Expected length is from packet sniffing - some applications may be different, especially using routing - not considered yet.
         if (data.readInt16BE(2) !== data.length || data.length < 22 || data[5] !== 0xd0 || data[4] !== data.length - 5) {
-            this.outputLog('INVALID PACKET or CONNECTION REFUSED - DISCONNECTING');
-            this.outputLog(data);
-            this.outputLog('TPKT Length From Header is ' + data.readInt16BE(2) + ' and RCV buffer length is ' + data.length + ' and COTP length is ' + data.readUInt8(4) + ' and data[5] is ' + data[5]);
+            this.outputLog('Invalid packet or connection refused - disconnecting', 1);
+            this.outputLog(data, 3);
+            this.outputLog('TPKT length from header is ' + data.readInt16BE(2) + ' and buffer length is ' + data.length + ' and COTP length is ' + data.readUInt8(4) + ' and data[5] is ' + data[5], 3);
             this.connectionReset();
-            return;
+            throw new Error('Invalid response on ISO reply');
         }
 
-        this.outputLog('ISO-on-TCP Connection Confirm Packet Received', 0, this.connectionId);
+        // Track the connection state
+        this.isoConnectionState = 'isoOnTcp'; // ISO-ON-TCP connected
+
+        this.outputLog('ISO-on-TCP connection confirm packet received', 3);
         this.negotiatePDU.writeInt16BE(this.requestMaxParallel, 19);
         this.negotiatePDU.writeInt16BE(this.requestMaxParallel, 21);
         this.negotiatePDU.writeInt16BE(this.requestMaxPDU, 23);
-
-        const timeHandler = (): void => {
-            this.packetTimeout('PDU');
-        };
-
-        this.PDUTimeout = setTimeout(timeHandler, this.globalTimeout);
-        (this.client as Socket).once('data', (data: Buffer): void => {
-            this.onPDUReply(data);
-        });
-
-        (this.client as Socket).on('error', (err: Error): void => {
-            console.log(err);
-            this.readWriteError(new Error('Error on ISO Reply'));
-        });
-
-        (this.client as Socket).write(this.negotiatePDU.slice(0, 25));
     }
 
-    private onTCPConnect(): void {
-        this.outputLog('TCP Connection Established to ' + (this.client as Socket).remoteAddress + ' on port ' + (this.client as Socket).remotePort, 0, this.connectionId);
-        this.outputLog('Will attempt ISO-on-TCP connection', 0, this.connectionId);
+    private async initISOConnect(): Promise<Buffer> {
+        this.outputLog('Will attempt ISO-on-TCP connection', 3);
+
         // Track the connection state
-        this.isoConnectionState = 'tcp'; // 2 = TCP connected, wait for ISO connection confirmation
+        this.isoConnectionState = 'tcp'; // TCP connected
 
         // Send an ISO-on-TCP connection request.
-
-        const timeHandler = (): void => {
-            this.packetTimeout('ISO');
-        };
-        this.connectTimeout = setTimeout(timeHandler, this.globalTimeout);
         const connBuf = this.connectReq;
-
         if (this.localTSAP !== undefined && this.remoteTSAP !== undefined) {
-            this.outputLog('Using localTSAP [0x' + this.localTSAP.toString(16) + '] and remoteTSAP [0x' + this.remoteTSAP.toString(16) + ']', 0, this.connectionId);
+            this.outputLog('Using localTSAP [0x' + this.localTSAP.toString(16) + '] and remoteTSAP [0x' + this.remoteTSAP.toString(16) + ']', 3);
             connBuf.writeUInt16BE(this.localTSAP, 16);
             connBuf.writeUInt16BE(this.remoteTSAP, 20);
         } else {
-            this.outputLog('Using rack [' + this.rack + '] and slot [' + this.slot + ']', 0, this.connectionId);
+            this.outputLog('Using rack [' + this.rack + '] and slot [' + this.slot + ']', 3);
             connBuf[21] = this.rack * 32 + this.slot;
         }
 
-        // Listen for a reply.
-        (this.client as Socket).once('data', (data: Buffer): void => {
-            this.onISOConnectReply(data);
-        });
+        return new Promise((resolve, reject) => {
+            const timeHandler = (): void => {
+                this.packetTimeout('ISO');
+                this.emit('connect-timeout');
+            };
+            this.connectTimeout = setTimeout(timeHandler, this.requestTimeout);
+            // Listen for a reply.
+            this.client.once('data', (data: Buffer): void => {
+                clearTimeout(this.connectTimeout as NodeJS.Timeout);
+                this.client.removeAllListeners('error');
+                resolve(data);
+            });
 
-        // // Hook up the event that fires on disconnect
-        (this.client as Socket).on('end', (): void => {
-            console.log('end');
-            // this.onClientDisconnect();
-        });
+            // Hook up the event that fires on disconnect
+            this.client.on('end', (): void => {
+                console.log('end');
+                // this.onClientDisconnect();
+            });
 
-        // listen for close (caused by us sending an end or caused by timeout socket)
-        (this.client as Socket).on('close', (hasError: boolean): void => {
-            if (hasError) {
-                this.outputLog('Connection has been closed due to a connection error or inactivity');
-                this.connectionReset();
-            }
-        });
+            // listen for close (caused by us sending an end or caused by timeout socket)
+            this.client.on('close', (hasError: boolean): void => {
+                if (hasError) {
+                    this.outputLog('Connection has been closed due to a connection error or inactivity', 2);
+                    this.connectionReset();
+                }
+            });
+            this.client.on('error', (err: Error): void => {
+                const error = new Error('Error ISO-on-TCP connection request. ' + err);
+                this.connectError(error);
+                reject(error);
+            });
 
-        (this.client as Socket).on('error', (err: Error): void => {
-            console.log('error');
-            this.connectionReset();
-            console.log(err);
+            this.client.write(connBuf);
         });
-
-        (this.client as Socket).write(connBuf);
     }
 
-    private connectNow(): void {
+    private initTCPConnect(): Promise<void> {
+        this.client = new Socket();
+
+        this.client.connect({
+            host: this.host,
+            port: this.port,
+        });
+
+        this.outputLog(`Attempting to connect to host ${this.host} on port ${this.port}`, 3);
+        return new Promise((resolve, reject): void => {
+            this.client.setTimeout(this.connectionTimeout || 5000, (): void => {
+                this.connectError(new Error('Connection timeout'));
+                this.emit('connect-timeout');
+            });
+
+            this.client.once('connect', (): void => {
+                this.client.setTimeout(0);
+                this.outputLog(`TCP Connection Established to ${this.client.remoteAddress} on port ${this.client.remotePort}`, 3);
+                resolve();
+            });
+
+            this.client.on('error', (err): void => {
+                const error = new Error('Something went wrong trying to connect. ' + err);
+                this.connectError(error);
+                reject(error);
+            });
+        });
+    }
+
+    private async connectNow(): Promise<void> {
         // prevents any reconnect timer to fire this again
         clearTimeout(this.reconnectTimer as NodeJS.Timeout);
 
@@ -1763,30 +1743,17 @@ export class S7Comm {
 
         this.connectionCleanup();
 
-        this.client = new Socket();
-
-        this.client = connect({
-            port: this.ConnectionConfig.port,
-            host: this.ConnectionConfig.host,
-        });
-
-        this.client.setTimeout(this.ConnectionConfig.timeout || 5000, (): void => {
-            (this.client as Socket).destroy();
-            this.connectError(new Error('Error connecting - destroying connection'));
-        });
-
-        this.client.once('connect', (): void => {
-            (this.client as Socket).setTimeout(0);
-            this.onTCPConnect();
-        });
-
-        this.client.on('error', (err): void => {
-            console.log(err);
-            (this.client as Socket).destroy();
-            this.connectError(new Error('Something went wrong trying to connect'));
-        });
-
-        this.outputLog('Attempting to connect to host...', 0, this.connectionId);
+        try {
+            await this.initTCPConnect();
+            const ISOResponse = await this.initISOConnect();
+            this.onISOConnectReply(ISOResponse);
+            const PDUResponse = await this.initPDUConnect();
+            this.onPDUReply(PDUResponse);
+            this.initS7commListeners();
+            this.emit('connected');
+        } catch (err) {
+            this.emit('error', err);
+        }
     }
 
     private sendNextRequest(): void {
@@ -1832,7 +1799,7 @@ export class S7Comm {
         const maxByteRequest = 4 * Math.floor((this.maxPDU - 18) / 4); // Absolutely must not break a real array into two requests.  Maybe we can extend by two bytes when not DINT/REAL/INT.
         // Optimize the items into blocks
         for (let i = 1; i < addressesToRead.length; i++) {
-            //     // Skip T, C, P types
+            // Skip T, C, P types
             if (
                 addressesToRead[i].areaS7Code !== readBlockList[thisBlock].addresses[0].areaS7Code || // Can't optimize between areas
                 addressesToRead[i].dbNumber !== readBlockList[thisBlock].addresses[0].dbNumber || // Can't optimize across DBs
@@ -1841,7 +1808,7 @@ export class S7Comm {
                 addressesToRead[i].offset - (readBlockList[thisBlock].addresses[0].offset + readBlockList[thisBlock].addresses[0].byteLength) > this.maxGap
             ) {
                 // If our gap is large, create a new block.
-                this.outputLog('Skipping optimization of item ' + addressesToRead[i].name, 0, this.connectionId);
+                this.outputLog('Skipping optimization of item ' + addressesToRead[i].name, 3);
                 // At this point we give up and create a new block.
                 readBlockList.push({
                     totalbyteLength: addressesToRead[i].byteLength,
@@ -1853,7 +1820,7 @@ export class S7Comm {
                 thisBlock = thisBlock + 1;
                 // globalReadBlockList[thisBlock].itemReference = itemList[i]; // By reference.
             } else {
-                this.outputLog('Attempting optimization of item ' + addressesToRead[i].name + '  ' + thisBlock + ' with ' + readBlockList[thisBlock].addresses[0].name, 0, this.connectionId);
+                this.outputLog('Attempting optimization of item ' + addressesToRead[i].name + '  ' + thisBlock + ' with ' + readBlockList[thisBlock].addresses[0].name, 3);
                 // This next line checks the maximum.
                 // Think of this situation - we have a large request of 40 bytes starting at byte 10.
                 //	Then someone else wants one byte starting at byte 12.  The block length doesn't change.
@@ -1875,7 +1842,7 @@ export class S7Comm {
         for (let i = 0; i < readBlockList.length; i++) {
             // How many parts?
             const parts: number = Math.ceil(readBlockList[i].totalbyteLength / maxByteRequest);
-            this.outputLog('globalReadBlockList ' + i + ' parts is ' + parts + ' offset is ' + readBlockList[i].addresses[0].offset + ' MBR is ' + maxByteRequest, 1, this.connectionId);
+            this.outputLog('globalReadBlockList ' + i + ' parts is ' + parts + ' offset is ' + readBlockList[i].addresses[0].offset + ' MBR is ' + maxByteRequest, 3);
 
             this.readRequestSequence += 1;
             if (this.readRequestSequence > 32767) {
@@ -1932,14 +1899,14 @@ export class S7Comm {
             const thisPacketNumber = readPacketArray.length - 1;
 
             readPacketArray[thisPacketNumber].seqNum = this.masterSequenceNumber;
-            this.outputLog('Sequence Number is ' + readPacketArray[thisPacketNumber].seqNum, 0, this.connectionId);
+            this.outputLog('Sequence Number is ' + readPacketArray[thisPacketNumber].seqNum, 3);
 
             for (let i = requestNumber; i < requestList.length; i++) {
                 //outputLog("Number is " + (requestList[i].byteLengthWithFill + 4 + packetReplyLength));
                 if (requestList[i].byteLengthWithFill + 4 + packetReplyLength > this.maxPDU || packetRequestLength + 12 > this.maxPDU) {
-                    this.outputLog('Splitting request: ' + numItems + ' items, requestLength would be ' + (packetRequestLength + 12) + ', replyLength would be ' + (requestList[i].byteLengthWithFill + 4 + packetReplyLength) + ', PDU is ' + this.maxPDU, 0, this.connectionId);
+                    this.outputLog('Splitting request: ' + numItems + ' items, requestLength would be ' + (packetRequestLength + 12) + ', replyLength would be ' + (requestList[i].byteLengthWithFill + 4 + packetReplyLength) + ', PDU is ' + this.maxPDU, 3);
                     if (numItems === 0) {
-                        this.outputLog("breaking when we shouldn't, rlibl " + requestList[i].byteLengthWithFill + ' MBR ' + maxByteRequest, 0, this.connectionId);
+                        this.outputLog("breaking when we shouldn't, rlibl " + requestList[i].byteLengthWithFill + ' MBR ' + maxByteRequest, 3);
                         throw new Error("Somehow write request didn't split properly - exiting.  Report this as a bug.");
                     }
                     break; // We can't fit this packet in here.
@@ -1957,7 +1924,7 @@ export class S7Comm {
     }
 
     private sendReadPacket(readPacketArray: S7PreparedReadRequest[]): void {
-        this.outputLog('SendReadPacket called', 1, this.connectionId);
+        this.outputLog('SendReadPacket called', 3);
 
         for (let i = 0; i < readPacketArray.length; i++) {
             // If our parallels jobs is on top, we are pushing into the queue
@@ -1988,11 +1955,12 @@ export class S7Comm {
                     responseBuffer: Buffer.alloc(8192),
                     seqNum: readPacketArray[i].seqNum,
                     readRequestSequence: readPacketArray[i].readRequestSequence,
-                    timeout: setTimeout(timeHandler, this.globalTimeout),
+                    timeout: setTimeout(timeHandler, this.requestTimeout),
                     reqTime: process.hrtime.bigint(),
                 });
                 this.parallelJobsNow += 1;
-                (this.client as Socket).write(this.readReq.slice(0, 19 + readPacketArray[i].requestList.length * 12));
+                this.outputLog(this.readReq.slice(0, 19 + readPacketArray[i].requestList.length * 12), 3);
+                this.client.write(this.readReq.slice(0, 19 + readPacketArray[i].requestList.length * 12));
             } else {
                 const timeHandler = (): void => {
                     this.packetTimeout('read', readPacketArray[i].seqNum);
@@ -2004,11 +1972,11 @@ export class S7Comm {
                     responseBuffer: Buffer.alloc(8192),
                     seqNum: readPacketArray[i].seqNum,
                     readRequestSequence: readPacketArray[i].readRequestSequence,
-                    timeout: setTimeout(timeHandler, this.globalTimeout),
+                    timeout: setTimeout(timeHandler, this.requestTimeout),
                     reqTime: process.hrtime.bigint(),
                 });
             }
-            this.outputLog('Sending Read Packet', 1, this.connectionId);
+            this.outputLog('Sending Read Packet', 3);
         }
     }
 
@@ -2037,7 +2005,7 @@ export class S7Comm {
             }
 
             for (let j = 0; j < parts; j++) {
-                const s7WriteItem: S7ItemWrite = this.S7ItemWrite;
+                const s7WriteItem: S7ItemWrite = getEmptyS7ItemWrite();
                 s7WriteItem.address = { ...itemList[i].address }; // We need a copy of values, not a reference
                 s7WriteItem.writeValue = itemList[i].writeValue;
                 requestList.push({
@@ -2093,7 +2061,7 @@ export class S7Comm {
 
             const thisPacketNumber = writePacketArray.length - 1;
             writePacketArray[thisPacketNumber].seqNum = this.masterSequenceNumber;
-            // this.outputLog('Write Sequence Number is ' + writePacketArray[thisPacketNumber].seqNum);
+            this.outputLog(`Write Sequence Number is ${writePacketArray[thisPacketNumber].seqNum}`, 3);
 
             writePacketArray[thisPacketNumber].requestList = []; // Initialize as array.
 
@@ -2102,9 +2070,9 @@ export class S7Comm {
                 if (requestList[i].itemReference.address.byteLengthWithFill + 12 + 4 + packetWriteLength > this.maxPDU) {
                     // 12 byte header for each item and 4 bytes for the data header
                     if (numItems === 0) {
-                        this.outputLog('breaking when we shouldnt, byte length with fill is  ' + requestList[i].itemReference.address.byteLengthWithFill + ' max byte request ' + maxByteRequest, 0, this.connectionId);
-                        this.lastError = 'Somehow write request didnt split properly - exiting.  Report this as a bug.';
-                        throw new Error(this.lastError);
+                        this.outputLog('Breaking when we shouldnt, byte length with fill is  ' + requestList[i].itemReference.address.byteLengthWithFill + ' max byte request ' + maxByteRequest, 1);
+                        this.outputLog('Somehow write request didnt split properly. This as a bug', 1);
+                        throw new Error('Somehow write request didnt split properly. This as a bug');
                     }
                     break; // We can't fit this packet in here.
                 }
@@ -2160,7 +2128,7 @@ export class S7Comm {
             dataBuffer.copy(this.writeReq, 19 + writePacketArray[i].requestList.length * 12, 0, dataBufferPointer);
 
             if (this.isoConnectionState === 's7comm') {
-                // this.outputLog('writing' + (19 + dataBufferPointer + writePacketArray[i].requestList.length * 12));
+                this.outputLog('Writing ' + (19 + dataBufferPointer + writePacketArray[i].requestList.length * 12) + ' bytes', 3);
                 const timeHandler = (): void => {
                     this.packetTimeout('write', writePacketArray[i].seqNum);
                 };
@@ -2169,15 +2137,16 @@ export class S7Comm {
                     sent: true,
                     rcvd: false,
                     seqNum: writePacketArray[i].seqNum,
-                    timeout: setTimeout(timeHandler, this.globalTimeout),
+                    timeout: setTimeout(timeHandler, this.requestTimeout),
                     writeRequestSequence: writePacketArray[i].writeRequestSequence,
                     reqTime: process.hrtime.bigint(),
                 });
                 this.parallelJobsNow += 1;
-                (this.client as Socket).write(this.writeReq.slice(0, 19 + dataBufferPointer + writePacketArray[i].requestList.length * 12)); // was 31
-                this.outputLog('Sending Write Packet With Sequence Number ' + writePacketArray[i].seqNum, 0, this.connectionId);
+                this.client.write(this.writeReq.slice(0, 19 + dataBufferPointer + writePacketArray[i].requestList.length * 12)); // was 31
+                this.outputLog('Sending write packet with sequence number ' + writePacketArray[i].seqNum, 3);
             } else {
                 const timeHandler = (): void => {
+                    this.outputLog('Write packet timeout with sequence number ' + writePacketArray[i].seqNum, 1);
                     this.packetTimeout('write', writePacketArray[i].seqNum);
                 };
                 this.sentWritePacketArray.push({
@@ -2185,7 +2154,7 @@ export class S7Comm {
                     sent: true,
                     rcvd: false,
                     seqNum: writePacketArray[i].seqNum,
-                    timeout: setTimeout(timeHandler, this.globalTimeout),
+                    timeout: setTimeout(timeHandler, this.requestTimeout),
                     writeRequestSequence: writePacketArray[i].writeRequestSequence,
                     reqTime: process.hrtime.bigint(),
                 });
@@ -2193,64 +2162,110 @@ export class S7Comm {
         }
     }
 
-    public initiateConnection(callback?: Function): void {
-        this.connectCallback = callback;
+    public initiateConnection(): void {
         this.connectNow();
     }
 
-    public async addItems(directions: string[]): Promise<void> {
-        let addresses: Address[] = [];
-        for (let i = directions.length - 1; i >= 0; i--) {
-            const index: number = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
-                return storedAddress.name === this.translationCB(directions[i]);
+    public addTranslationItems(variables: { [key: string]: string }): void {
+        Object.keys(variables).forEach((key): void => {
+            if (typeof variables[key] !== 'string' || !variables[key]) {
+                this.outputLog(`Invalid value for a translation. The value is: ${variables[key]}`, 2);
+                throw new Error(`Invalid value for a translation. The value is: ${variables[key]}`);
+            }
+        });
+        Object.assign(this.directionsTranslated, variables);
+    }
+
+    public deleteTranslationItem(item: string): void {
+        delete this.directionsTranslated[item];
+    }
+
+    public addTags(tags: string | string[]): void {
+        // Check if we have already have the S7Address for the new tags. Ignore if we already have the S7Address.
+        if (Array.isArray(tags)) {
+            for (let i = tags.length - 1; i >= 0; i--) {
+                const index = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
+                    return storedAddress.name === this.getTranslatedTag(tags[i]);
+                });
+                if (index >= 0 || typeof this.getTranslatedTag(tags[i]) === 'undefined') {
+                    tags.splice(index, 1);
+                    this.outputLog(`Ignoring ${tags[i]} because it already exists`, 3);
+                }
+            }
+        } else if (typeof tags === 'string') {
+            const index = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
+                return storedAddress.name === this.getTranslatedTag(tags);
             });
-            if (index >= 0 || typeof this.translationCB(directions[i]) === 'undefined') {
-                console.log(directions[i]);
-                directions.splice(index, 1);
+            if (index >= 0 || typeof this.getTranslatedTag(tags) === 'undefined') {
+                this.outputLog(`Ignoring ${tags} because it already exists`, 3);
+                return;
             }
         }
-        if (directions.length === 0) {
-            return;
-        }
-        try {
-            addresses = await this.stringArrayToS7AddressArray(directions, 'read');
-        } catch (err) {
-            return Promise.reject(err);
-        }
-        for (let i = 0; i < addresses.length; i++) {
-            this.storedAdresses.push(addresses[i]);
+
+        if (Array.isArray(tags)) {
+            for (let i = 0; i < tags.length; i++) {
+                this.outputLog(`Adding Tag ${tags[i]}`, 3);
+                if (typeof tags[i] === 'string') {
+                    const address = this.stringToS7Addr('read', this.getTranslatedTag(tags[i]), tags[i]);
+                    this.storedAdresses.push(address);
+                    this.outputLog(`Added Tag ${tags[i]}`, 3);
+                }
+            }
+        } else if (typeof tags === 'string') {
+            this.outputLog(`Adding Tag ${tags}`, 3);
+            const address = this.stringToS7Addr('read', this.getTranslatedTag(tags), tags);
+            this.storedAdresses.push(address);
+            this.outputLog(`Added Tag ${tags}`, 3);
         }
     }
 
-    public removeItems(directions: string[]): void {
-        for (let i = 0; i < directions.length; i++) {
-            const index: number = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
-                return storedAddress.name === this.translationCB(directions[i]);
+    public removeTags(tags: string | string[]): void {
+        if (Array.isArray(tags)) {
+            for (let i = 0; i < tags.length; i++) {
+                const index = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
+                    return storedAddress.name === this.getTranslatedTag(tags[i]);
+                });
+                if (index >= 0) {
+                    this.storedAdresses.splice(index, 1);
+                }
+            }
+        } else if (typeof tags === 'string') {
+            const index = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
+                return storedAddress.name === this.getTranslatedTag(tags);
             });
             if (index >= 0) {
                 this.storedAdresses.splice(index, 1);
             }
         }
+        this.outputLog(`Tag ${tags} removed`, 3);
     }
 
-    public async readItems(directions: string[]): Promise<any> {
+    public async readTags(tags: string | string[]): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
-            this.lastError = 'Unable to read when not connected.';
-            this.outputLog(this.lastError, 0, this.connectionId);
-            return Promise.reject(new Error(this.lastError));
+            this.outputLog('Unable to read when not connected', 1);
+            return Promise.reject(new Error('Unable to read when not connected'));
         }
-        if (!(directions instanceof Array)) {
-            this.lastError = 'Bad values given.';
-            this.outputLog(this.lastError, 0, this.connectionId);
-            return Promise.reject(new Error(this.lastError));
+
+        // Here we store the tags provided
+        const addresses: Address[] = [];
+
+        if (Array.isArray(tags)) {
+            // Check if tags provided are an array
+            for (let i = 0; i < tags.length; i++) {
+                this.outputLog(`Prepare to read ${this.getTranslatedTag(tags[i])}`, 3);
+                addresses.push(this.stringToS7Addr('read', this.getTranslatedTag(tags[i]), tags[i]));
+            }
+        } else if (typeof tags === 'string') {
+            // Are only one tag because `tags` is a string
+            this.outputLog(`Prepare to read ${this.getTranslatedTag(tags)}`, 3);
+            addresses.push(this.stringToS7Addr('read', this.getTranslatedTag(tags), tags));
+        } else {
+            this.outputLog('Invalid values provided', 1);
+            return Promise.reject(new Error('Invalid values provided'));
         }
-        let addresses: Address[] = [];
-        try {
-            addresses = await this.stringArrayToS7AddressArray(directions, 'read');
-        } catch (err) {
-            return Promise.reject(err);
-        }
-        const promises: Promise<any>[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+        // Create the promises for each Tags and we stored in the same address object
+        const promises: Promise<any>[] = [];
         addresses.forEach((address): void => {
             const promise = new Promise((resolve, reject): void => {
                 address.promiseResolve = resolve;
@@ -2262,27 +2277,25 @@ export class S7Comm {
         const preparedReadRequest: S7PreparedReadRequest[] = this.prepareReadPacket(addresses);
         this.sendReadPacket(preparedReadRequest); // Note this sends the first few read packets depending on parallel connection restrictions.
 
-        return Promise.all(promises)
-            .then((values: any): void => {
-                return Object.assign({}, ...values);
-            })
-            .catch((err): void => {
-                throw new Error(err);
-            });
+        // We return a `Promise.all` of promises created to be resolved or rejected
+        return Promise.all(promises).then((values): void => {
+            return Object.assign({}, ...values);
+        });
     }
 
     public async readAllItems(): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
-            this.lastError = 'Unable to read when not connected.';
-            this.outputLog(this.lastError, 0, this.connectionId);
-            return Promise.reject(new Error(this.lastError));
+            this.outputLog('Unable to read when not connected', 1);
+            return Promise.reject(new Error('Unable to read when not connected'));
         }
+        // If we no have adresses stored, we immediately return an empty array
         if (this.storedAdresses.length === 0) {
             return Promise.resolve([]);
         }
         const addresses: Address[] = [...this.storedAdresses]; // We need a copy, not a reference
 
-        const promises: Promise<any>[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+        // Create the promises for each Tags and we stored in `addresses` object
+        const promises: Promise<any>[] = [];
         addresses.forEach((address): void => {
             const promise = new Promise((resolve, reject): void => {
                 address.promiseResolve = resolve;
@@ -2294,45 +2307,52 @@ export class S7Comm {
         const preparedReadRequest: S7PreparedReadRequest[] = this.prepareReadPacket(addresses);
         this.sendReadPacket(preparedReadRequest); // Note this sends the first few read packets depending on parallel connection restrictions.
 
-        return Promise.all(promises)
-            .then((values: any): void => {
-                return Object.assign({}, ...values);
-            })
-            .catch((err): void => {
-                throw new Error(err);
-            });
+        // We return a `Promise.all` of promises created to be resolved or rejected
+        return Promise.all(promises).then((values) => {
+            return Object.assign({}, ...values);
+        });
     }
 
-    public async writeItems(directions: string[], value: any[]): Promise<any> {
+    public async writeTags(tags: string | string[], value: any | any[]): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
-            this.lastError = 'Unable to write when not connected.';
-            this.outputLog(this.lastError, 0, this.connectionId);
-            return Promise.reject(new Error(this.lastError));
-        }
-        if (!(directions instanceof Array) || !(value instanceof Array)) {
-            this.lastError = 'Bad values given.';
-            this.outputLog(this.lastError, 0, this.connectionId);
-            return Promise.reject(new Error(this.lastError));
-        }
-        this.outputLog('Preparing to WRITE ' + directions + ' to value ' + value, 0, this.connectionId);
-        let addresses: Address[] = [];
-        try {
-            addresses = await this.stringArrayToS7AddressArray(directions, 'write');
-        } catch (err) {
-            return Promise.reject(err);
+            this.outputLog('Unable to write when not connected.', 1);
+            return Promise.reject(new Error('Unable to write when not connected'));
         }
 
-        const instantWriteBlockList: S7ItemWrite[] = []; // Initialize the array.
+        // Here we store the tags provided
+        const addresses: Address[] = [];
 
+        if (Array.isArray(tags) && Array.isArray(value)) {
+            // Check if values provided are an array of tags and have the same length
+            if (tags.length !== value.length) {
+                this.outputLog('Tags array and value array must have the same length', 1);
+                return Promise.reject(new Error('Tags array and value array must have the same length'));
+            }
+            for (let i = 0; i < tags.length; i++) {
+                this.outputLog(`Prepare to write in ${this.getTranslatedTag(tags[i])} the value of ${value[i]}`, 3);
+                addresses.push(this.stringToS7Addr('write', this.getTranslatedTag(tags[i]), tags[i]));
+            }
+        } else if (typeof tags === 'string') {
+            // Are only one tag because `tags` is a string
+            this.outputLog(`Prepare to write in ${this.getTranslatedTag(tags)} the value of ${value}`, 3);
+            addresses.push(this.stringToS7Addr('write', this.getTranslatedTag(tags), tags));
+        } else {
+            this.outputLog('Invalid values provided', 1);
+            return Promise.reject(new Error('Invalid values provided'));
+        }
+
+        const instantWriteBlockList: S7ItemWrite[] = []; // Initialize the array
+
+        // Create the promises for each Tags and we stored in the same address object
         const promises: Promise<any>[] = [];
         addresses.forEach((address, index): void => {
             const promise = new Promise((resolve, reject): void => {
                 address.promiseResolve = resolve;
                 address.promiseReject = reject;
             });
-            const s7ItemWrite = this.S7ItemWrite;
+            const s7ItemWrite = getEmptyS7ItemWrite();
             s7ItemWrite.address = address;
-            s7ItemWrite.writeValue = value[index];
+            s7ItemWrite.writeValue = Array.isArray(value[index]) ? value[index] : value;
             instantWriteBlockList.push(s7ItemWrite);
             promises.push(promise);
         });
@@ -2341,46 +2361,9 @@ export class S7Comm {
 
         this.sendWritePacket(writePacketArray);
 
-        return Promise.all(promises)
-            .then((values: any): void => {
-                return Object.assign({}, ...values);
-            })
-            .catch((): void => {
-                throw new Error(this.lastError);
-            });
-    }
-
-    private get Address(): Address {
-        return {
-            name: '',
-            userName: '',
-            Type: 'C',
-            dataType: '',
-            dbNumber: 0,
-            bitOffset: 0,
-            offset: 0,
-            arrayLength: 0,
-            dataTypeLength: 0,
-            areaS7Code: 0x1c,
-            byteLength: 0,
-            byteLengthWithFill: 0,
-            transportCode: 0x04,
-            valid: true,
-        };
-    }
-
-    private get S7ItemWrite(): S7ItemWrite {
-        return {
-            address: this.Address,
-            quality: '',
-            writeQuality: '',
-            writeResponse: 0,
-            writeBuffer: Buffer.alloc(8192),
-            writeValue: 0,
-            valid: false,
-            errCode: '',
-            validResponseBuffer: false,
-            resultReference: undefined,
-        };
+        // We return a `Promise.all` of promises created to be resolved or rejected
+        return Promise.all(promises).then((values) => {
+            return Object.assign({}, ...values);
+        });
     }
 }
