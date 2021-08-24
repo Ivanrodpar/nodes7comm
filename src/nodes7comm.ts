@@ -302,6 +302,11 @@ export class NodeS7Comm extends EventEmitter {
                     address.Type = 'I';
                     address.dataType = 'REAL';
                     break;
+                case 'ILR':
+                case 'ELR':
+                    address.Type = 'I';
+                    address.dataType = 'LREAL';
+                    break;
 
                 /* All styles of standard outputs (in oposit to peripheral outputs) */
                 case 'Q':
@@ -344,6 +349,11 @@ export class NodeS7Comm extends EventEmitter {
                     address.Type = 'Q';
                     address.dataType = 'REAL';
                     break;
+                case 'QLR':
+                case 'ALR':
+                    address.Type = 'Q';
+                    address.dataType = 'LREAL';
+                    break;
 
                 /* All styles of marker */
                 case 'M':
@@ -362,13 +372,14 @@ export class NodeS7Comm extends EventEmitter {
                     address.Type = 'M';
                     address.dataType = 'WORD';
                     break;
+                case 'MD':
+                case 'MDW':
+                    address.Type = 'M';
+                    address.dataType = 'DWORD';
+                    break;
                 case 'MI':
                     address.Type = 'M';
                     address.dataType = 'INT';
-                    break;
-                case 'MD':
-                    address.Type = 'M';
-                    address.dataType = 'DWORD';
                     break;
                 case 'MDI':
                     address.Type = 'M';
@@ -377,6 +388,10 @@ export class NodeS7Comm extends EventEmitter {
                 case 'MR':
                     address.Type = 'M';
                     address.dataType = 'REAL';
+                    break;
+                case 'MLR':
+                    address.Type = 'M';
+                    address.dataType = 'LREAL';
                     break;
 
                 /* Timer */
@@ -427,18 +442,26 @@ export class NodeS7Comm extends EventEmitter {
         if (address.dataType === 'I') {
             address.dataType = 'INT';
         }
+        if (address.dataType === 'W') {
+            address.dataType = 'WORD';
+        }
         if (address.dataType === 'DW') {
             address.dataType = 'DWORD';
         }
         if (address.dataType === 'R') {
             address.dataType = 'REAL';
         }
+        if (address.dataType === 'LR') {
+            address.dataType = 'LREAL';
+        }
 
         switch (address.dataType) {
-            case 'REAL':
-            case 'DWORD':
-            case 'DINT':
-                address.dataTypeLength = 4;
+            case 'X':
+            case 'B':
+            case 'C':
+            case 'BYTE':
+            case 'CHAR':
+                address.dataTypeLength = 1;
                 break;
             case 'INT':
             case 'WORD':
@@ -446,12 +469,13 @@ export class NodeS7Comm extends EventEmitter {
             case 'COUNTER':
                 address.dataTypeLength = 2;
                 break;
-            case 'X':
-            case 'B':
-            case 'C':
-            case 'BYTE':
-            case 'CHAR':
-                address.dataTypeLength = 1;
+            case 'REAL':
+            case 'DWORD':
+            case 'DINT':
+                address.dataTypeLength = 4;
+                break;
+            case 'LREAL':
+                address.dataTypeLength = 8;
                 break;
             case 'S':
             case 'STRING':
@@ -596,6 +620,9 @@ export class NodeS7Comm extends EventEmitter {
                     case 'REAL':
                         writeBuffer.writeFloatBE((writeValue as number[])[arrayIndex], thePointer);
                         break;
+                    case 'LREAL':
+                        writeBuffer.writeDoubleBE((writeValue as number[])[arrayIndex], thePointer);
+                        break;
                     case 'DWORD':
                         writeBuffer.writeInt32BE((writeValue as number[])[arrayIndex], thePointer);
                         break;
@@ -664,6 +691,9 @@ export class NodeS7Comm extends EventEmitter {
             switch (address.dataType) {
                 case 'REAL':
                     writeBuffer.writeFloatBE(writeValue as number, thePointer);
+                    break;
+                case 'LREAL':
+                    writeBuffer.writeDoubleBE(writeValue as number, thePointer);
                     break;
                 case 'DWORD':
                     writeBuffer.writeUInt32BE(writeValue as number, thePointer);
@@ -1058,6 +1088,9 @@ export class NodeS7Comm extends EventEmitter {
                     case 'REAL':
                         (readValue as number[]).push(buffer.readFloatBE(thePointer));
                         break;
+                    case 'LREAL':
+                        (readValue as number[]).push(buffer.readDoubleBE(thePointer));
+                        break;
                     case 'DWORD':
                         (readValue as number[]).push(buffer.readUInt32BE(thePointer));
                         break;
@@ -1127,6 +1160,9 @@ export class NodeS7Comm extends EventEmitter {
                 switch (address.dataType) {
                     case 'REAL':
                         readValue = buffer.readFloatBE(thePointer);
+                        break;
+                    case 'LREAL':
+                        readValue = buffer.readDoubleBE(thePointer);
                         break;
                     case 'DWORD':
                         readValue = buffer.readUInt32BE(thePointer);
@@ -1411,8 +1447,8 @@ export class NodeS7Comm extends EventEmitter {
         // Then we need to add 4 for TPKT header.
 
         if (!(theData && theData.length > 6)) {
-            this.outputLog('INVALID READ RESPONSE - DISCONNECTING', 1);
-            this.outputLog("The incoming packet doesn't have the required minimum length of 7 bytes", 1);
+            this.outputLog('Invalid read response - disconecting', 1);
+            this.outputLog("The incoming packet doesn't have the required minimum length of 7 bytes", 3);
             this.outputLog(theData, 3);
             return;
         }
@@ -1487,8 +1523,8 @@ export class NodeS7Comm extends EventEmitter {
                 return;
             }
         } else {
-            this.outputLog('INVALID READ RESPONSE - DISCONNECTING', 1);
-            this.outputLog('TPKT Length From Header is ' + theData.readInt16BE(2) + ' and RCV buffer length is ' + theData.length + ' and COTP length is ' + theData.readUInt8(4) + ' and data[6] is ' + theData[6], 3);
+            this.outputLog('Invalid response - disconecting', 1);
+            this.outputLog('TPKT length from header is ' + theData.readInt16BE(2) + ' and RCV buffer length is ' + theData.length + ' and COTP length is ' + theData.readUInt8(4) + ' and data[6] is ' + theData[6], 3);
             this.outputLog(theData, 3);
             this.connectionReset();
             return;
@@ -1538,7 +1574,7 @@ export class NodeS7Comm extends EventEmitter {
         const data = this.checkRfcData(theData);
         if (data === 'fastACK') {
             //Read again and wait for the requested data
-            this.outputLog('Fast Acknowledge received.', 3);
+            this.outputLog('Fast Acknowledge received', 3);
 
             this.client.removeAllListeners('error');
             this.client.removeAllListeners('data');
@@ -1612,6 +1648,7 @@ export class NodeS7Comm extends EventEmitter {
                 resolve(data);
             });
 
+            this.client.removeAllListeners('error');
             this.client.on('error', (err: Error): void => {
                 const error = new Error('Error on PDU negotiation. ' + err);
                 this.readWriteError(error);
@@ -1674,7 +1711,6 @@ export class NodeS7Comm extends EventEmitter {
             // Listen for a reply.
             this.client.once('data', (data: Buffer): void => {
                 clearTimeout(this.connectTimeout as NodeJS.Timeout);
-                this.client.removeAllListeners('error');
                 resolve(data);
             });
 
