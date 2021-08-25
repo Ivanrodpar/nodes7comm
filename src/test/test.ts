@@ -1,19 +1,11 @@
-import { S7Comm, Nodes7CommConfig } from '../index';
+import { NodeS7Comm, Nodes7CommConfig } from '../index';
 
 async function test(): Promise<void> {
     const options: Nodes7CommConfig = {
         host: '192.168.1.200',
-        // logLevel: 'info',
     };
-    const s7Client = new S7Comm(options);
+    const s7Client = new NodeS7Comm(options);
     try {
-        const tags = {
-            a: 'DB100,REAL22',
-            b: 'DB100,REAL26',
-            c: 'DB100,REAL30',
-        };
-        s7Client.addTranslationItems(tags);
-        s7Client.addTags(Object.keys(tags));
         s7Client.initiateConnection();
         s7Client.on('error', (err) => {
             console.log('onError', err);
@@ -21,8 +13,13 @@ async function test(): Promise<void> {
         s7Client.on('disconnected', () => {
             console.log('onDisconnected');
         });
-        s7Client.on('connected', () => {
-            console.log('onConnected');
+        s7Client.on('connected', async () => {
+            const tags = {
+                input: 'I0.0',
+                output: 'Q0.0',
+            };
+            s7Client.addTranslationTags(tags);
+            s7Client.addTags(Object.keys(tags));
             read(s7Client);
         });
         s7Client.on('connect-timeout', () => {
@@ -33,12 +30,12 @@ async function test(): Promise<void> {
     }
 }
 
-async function read(s7Client: S7Comm): Promise<void> {
+async function read(s7Client: NodeS7Comm): Promise<void> {
     setTimeout(async () => {
         try {
-            const response = await s7Client.readTags('a');
+            const response = await s7Client.readAllTags();
             console.log(response);
-            const response2 = await s7Client.writeTags('a', response.a > 0 ? 0 : 1);
+            await s7Client.writeTags('output', response.output ? false : true);
             read(s7Client);
         } catch (err) {
             console.log(err);
