@@ -75,6 +75,7 @@ s7Client.on('connect-timeout', () => {
 |autoReconnect|boolean |false| true | Auto connect after disconnect |
 |logLevel| 'none' <br> 'error' <br> 'warn' <br> 'info' | false | 'none' | Show logs in console|
 
+
 <a name="readTags">readTags</a> 
 
 ```ts
