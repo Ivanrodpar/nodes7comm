@@ -7,6 +7,7 @@
 
 ## Breaking Changes
 
+- `S7Comm` class has been renamed. Use `NodeS7Comm`.
 - `initiateConnection` callback has been removed. Use `connected` event instead.
 - `setTranslationCB` has been removed. Use `addTranslationTags` instead.
 - `readItems` has been removed. Use `readTags` instead.
