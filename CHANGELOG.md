@@ -9,11 +9,11 @@
 
 - `initiateConnection` callback has been removed. Use `connected` event instead.
 - `setTranslationCB` has been removed. Use `addTranslationTags` instead.
-- `readItems` has been removed. Use `readTags` addTags instead.
-- `writeItems` has been removed. Use `writeTags` addTags instead.
-- `addItems` has been removed. Use `addTags` addTags instead.
-- `removeItems` has been removed. Use `removeTags` addTags instead.
-- `readAllItems` has been removed. Use `readAllTags` addTags instead.
+- `readItems` has been removed. Use `readTags` instead.
+- `writeItems` has been removed. Use `writeTags` instead.
+- `addItems` has been removed. Use `addTags` instead.
+- `removeItems` has been removed. Use `removeTags` instead.
+- `readAllItems` has been removed. Use `readAllTags` instead.
 
 
 ### v1.0.3
