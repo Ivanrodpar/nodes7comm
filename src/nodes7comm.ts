@@ -2198,7 +2198,7 @@ export class NodeS7Comm extends EventEmitter {
         this.connectNow();
     }
 
-    public addTranslationItems(variables: { [key: string]: string }): void {
+    public addTranslationTags(variables: { [key: string]: string }): void {
         Object.keys(variables).forEach((key): void => {
             if (typeof variables[key] !== 'string' || !variables[key]) {
                 this.outputLog(`Invalid value for a translation. The value is: ${variables[key]}`, 2);
@@ -2208,12 +2208,12 @@ export class NodeS7Comm extends EventEmitter {
         Object.assign(this.directionsTranslated, variables);
     }
 
-    public deleteTranslationItem(item: string): void {
+    public deleteTranslationTag(item: string): void {
         delete this.directionsTranslated[item];
     }
 
     public addTags(tags: string | string[]): void {
-        // Check if we have already have the S7Address for the new tags. Ignore if we already have the S7Address.
+        // Check if we have already the S7Address for the new tags. Ignore if we already have the S7Address.
         if (Array.isArray(tags)) {
             for (let i = tags.length - 1; i >= 0; i--) {
                 const index = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
@@ -2315,7 +2315,7 @@ export class NodeS7Comm extends EventEmitter {
         });
     }
 
-    public async readAllItems(): Promise<any> {
+    public async readAllTags(): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
             this.outputLog('Unable to read when not connected', 1);
             return Promise.reject(new Error('Unable to read when not connected'));

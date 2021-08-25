@@ -11,7 +11,6 @@ export interface Nodes7CommConfig {
     requestTimeout?: number;
     localTSAP?: number;
     remoteTSAP?: number;
-    callback?: any;
     connectionName?: string;
     optimize?: boolean;
     autoReconnect?: boolean;
