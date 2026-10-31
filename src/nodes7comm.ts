@@ -1,13 +1,13 @@
 /// <reference types="node" preserve="true" />
 import { Socket } from 'net';
 import { format } from 'util';
-import { EventEmitter } from 'stream';
+import { EventEmitter } from 'events';
 
-import { ConnectionState, PacketTimeout, Nodes7CommConfig } from './types/nodes7comm-config.types';
-import { RequestQueue, SendReadRequest, SendWriteRequest, S7ItemWrite, ReadBlock, S7PreparedReadRequest, S7PreparedWriteRequest, OptimizableReadBlocks, WriteBlock } from './types/request.types';
-import { Address } from './types/address.types';
-import { NodeS7CommEvents } from './types/nodes7comm-events.types';
-import { getEmptyAddress, getEmptyS7ItemWrite } from './address';
+import type { ConnectionState, PacketTimeout, Nodes7CommConfig } from './types/nodes7comm-config.types.ts';
+import type { RequestQueue, SendReadRequest, SendWriteRequest, S7ItemWrite, ReadBlock, S7PreparedReadRequest, S7PreparedWriteRequest, OptimizableReadBlocks, WriteBlock } from './types/request.types.ts';
+import type { Address } from './types/address.types.ts';
+import type { NodeS7CommEvents } from './types/nodes7comm-events.types.ts';
+import { getEmptyAddress, getEmptyS7ItemWrite } from './address.ts';
 
 // Typed events. `extends EventEmitter<Events>` would replace this merge, but consumers on an older @types/node (non-generic EventEmitter) would break.
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging

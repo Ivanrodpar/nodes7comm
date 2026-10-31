@@ -1,5 +1,5 @@
-import { Address } from './types/address.types';
-import { S7ItemWrite } from './types/request.types';
+import type { Address } from './types/address.types.ts';
+import type { S7ItemWrite } from './types/request.types.ts';
 
 export function getEmptyAddress(): Address {
     return {

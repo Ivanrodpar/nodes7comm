@@ -1,5 +1,5 @@
 /// <reference types="node" preserve="true" />
-import { Address } from './address.types';
+import type { Address } from './address.types.ts';
 
 export interface SendReadRequest {
     seqNum: number; // Made-up sequence number to watch for.

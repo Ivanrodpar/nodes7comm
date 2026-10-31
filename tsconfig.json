@@ -12,6 +12,9 @@
     "outDir": "lib",
     "rootDir": "src",
     "strict": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "rewriteRelativeImportExtensions": true,
   },
   "exclude": [
     "lib",

@@ -1,4 +1,5 @@
-import { NodeS7Comm, Nodes7CommConfig } from '../index';
+import { NodeS7Comm } from '../index.ts';
+import type { Nodes7CommConfig } from '../index.ts';
 
 async function test(): Promise<void> {
     const options: Nodes7CommConfig = {

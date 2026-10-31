@@ -9,11 +9,12 @@ Librería TypeScript publicada en npm para comunicarse con PLCs Siemens S7-300/4
 - `npm run lint`: ESLint 10 con flat config (`eslint.config.mjs`), con typescript-eslint y prettier como regla.
 - `npm test`: compila y corre la suite de `test/` con `node:test` contra un PLC simulado. Tarda menos de 1 s.
 - Un solo archivo o test: `npx tsc && node --test --test-name-pattern="<nombre>" test/<archivo>.test.ts`.
-- `npm run test:plc`: el script manual `src/test/test.ts` contra un PLC real en `192.168.1.200`. Con `autoReconnect` reintenta en bucle si no hay PLC.
+- `npm run test:plc`: ejecuta directamente con Node (sin compilar) el script manual `src/test/test.ts` contra un PLC real en `192.168.1.200`. **Escribe en el PLC**: no lo ejecutes sin que el autor lo pida. Con `autoReconnect` reintenta en bucle si no hay PLC.
+- Para desarrollar hace falta Node ≥22.18, que ejecuta TypeScript sin compilar, y es lo que usan los tests y `test:plc`. Quien instala el paquete solo necesita lo que dice `engines`.
 
 ## Arquitectura
 
-Todo vive en una sola clase, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 líneas), que extiende `EventEmitter`. Los tipos internos están en `src/types/`. `src/index.ts` solo exporta `NodeS7Comm` y `Nodes7CommConfig`; todo lo demás es privado.
+Todo vive en una sola clase, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 líneas), que extiende `EventEmitter`. Los tipos internos están en `src/types/`. `src/index.ts` solo exporta `NodeS7Comm` y `Nodes7CommConfig`; todo lo demás es privado. La clase se mantiene en un solo archivo por decisión del autor: no propongas dividirla en módulos.
 
 **Conexión** (`connectNow`): TCP (`initTCPConnect`) → COTP connection request/confirm (`initISOConnect` / `onISOConnectReply`) → negociación de PDU (`initPDUConnect` / `onPDUReply`, que fija `maxPDU` y `maxParallel`) → estado `s7comm` → evento `connected`.
 
@@ -32,7 +33,6 @@ Todo vive en una sola clase, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 líneas), 
 - Usan el runner que trae Node (`node:test` + `node:assert/strict`), sin dependencias.
 - Están escritos en TypeScript y Node los ejecuta quitando los tipos, así que solo se admite sintaxis "borrable": nada de `enum`, `namespace` ni parameter properties; los imports de tipos van con `import type`, y los imports relativos llevan la extensión `.ts`. `tsc` todavía no los revisa (solo compila `src/`).
 - Importan el `lib/` **compilado** (`../lib/index.js`), así que prueban lo que se publica. Por eso `npm test` compila primero.
-- `test/package.json` (`"type": "module"`) existe para que Node trate los tests como ESM sin avisos. No lo borres.
 - `test/helpers/fake-plc.ts` simula un PLC: memoria por área y DB (`plc.db(1)`, `plc.area(AREA.M)`), registro de lo que recibe (`plc.jobs`, `plc.connectionRequests`) e interruptores de fallo (`silent`, `responseDelay`, `splitResponses`, `itemReturnCode`, `invalidPduReply`, `ignoreConnectionRequests`, `pduSize`, `maxParallel`). No simula timers ni counters.
 - Crea los clientes con `connectClient`/`createClient` (por defecto `autoReconnect: false`) y llama a `disposeClients()` en `afterEach`. Mientras no exista un `disconnect()` público, ese helper cierra el socket accediendo al estado privado del cliente.
 - Espera (`await`) todas las promesas del cliente: un rechazo sin manejar tira el proceso del test.
@@ -59,10 +59,19 @@ Cada bug tiene un test en `test/known-bugs.test.ts` que describe el comportamien
 ## Herramientas (actualizadas el 2026-10-31)
 
 - TypeScript está fijado en `~6.0.x` a propósito: typescript-eslint 8 solo soporta `typescript <6.1.0`, y TypeScript 7 (el compilador en Go) todavía no es compatible. Antes de subirlo, revisa el `peerDependencies` de `typescript-eslint`.
-- `tsconfig.json` compila a ES2022 con `module: nodenext`. Como `package.json` no tiene `"type": "module"`, la salida es CommonJS. `target: es5` y `moduleResolution: node` ya no son válidos desde TS 6.
+- El paquete es **solo ESM** (`"type": "module"`); no hay build CommonJS. Quien usa CommonJS hace `require()` del ESM, que Node soporta desde 20.19 / 22.12.
+- `tsconfig.json` compila a ES2022 con `module: nodenext`, más `verbatimModuleSyntax`, `erasableSyntaxOnly` y `rewriteRelativeImportExtensions`. Esto obliga a tres cosas en `src/`:
+  - los imports relativos llevan la extensión `.ts` (`tsc` la reescribe a `.js` en `lib/`);
+  - lo que solo es tipo se importa con `import type`;
+  - nada de sintaxis que Node no pueda borrar (`enum`, `namespace`, parameter properties).
+
+  Gracias a eso Node puede ejecutar `src/` sin compilar.
+- Los `.d.ts` de `lib/` conservan los `.ts` en sus imports (TS no los reescribe). Funciona para quien instala con TS ≥5.0; con TS 4.9 los tipos quedan como `any`. Verificado el 2026-10-31 con TS 4.9, 5.0, 5.4, 5.7, 5.8 y 6.0, en los modos `nodenext` (ESM y CommonJS), `bundler` y `node10`. CommonJS con `nodenext` necesita TS ≥5.8, como cualquier paquete solo-ESM.
+- `EventEmitter` se importa de `'events'`. En ESM, `import { EventEmitter } from 'stream'` falla: solo funcionaba en CommonJS, por herencia.
+- `.prettierrc.js` es ESM (`export default`), porque el paquete es `"type": "module"`.
 - `src/nodes7comm.ts` y `src/types/request.types.ts` tienen `/// <reference types="node" preserve="true" />`. No la quites: sin ella, los `.d.ts` publicados pierden la referencia a `@types/node` (TS ≥5.5 ya no la genera).
 - La fusión interfaz + clase de `NodeS7Comm` (eventos tipados) tiene `eslint-disable` a propósito; reemplazarla por `EventEmitter<Events>` cambia los tipos públicos.
-- `npm audit` reporta avisos solo en herramientas de desarrollo: `minimatch` (lo traen ESLint y typescript-eslint, sin arreglo publicado) y `diff` (lo trae ts-node, que ya no se mantiene). No se publican.
+- `npm audit` reporta avisos solo en `minimatch`, que traen ESLint y typescript-eslint y que todavía no tiene arreglo publicado. Son herramientas de desarrollo y no se publican.
 
 ## Convenciones
 
@@ -76,4 +85,5 @@ Cada bug tiene un test en `test/known-bugs.test.ts` que describe el comportamien
 
 - `package.json` tiene `"files": ["lib"]`, así que solo se publican `lib/`, README, LICENSE y package.json (ni este archivo ni `test/`).
 - No hay `prepublishOnly`: corre `npm run build` antes de `npm publish`, o se publicará un `lib/` viejo.
-- La 2.0.0 se publicó compilada a ES5. Desde la actualización de herramientas, `lib/` sale en ES2022, que requiere Node ≥16.11 en quien instala (ya anotado en `Unreleased` como breaking). Considera agregar `engines`.
+- `exports` solo expone la raíz del paquete (`types` + `default`), y `engines` pide Node `^20.19.0 || >=22.12.0`. Los dos cambios ya están anotados en `Unreleased` como breaking.
+- Antes de publicar, prueba el tarball como lo usaría alguien que lo instala: `npm pack`, instálalo en un proyecto temporal y verifica `import`, `require()` y el type-check con TypeScript.

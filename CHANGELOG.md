@@ -2,10 +2,14 @@
 
 - test: Added an automated test suite that runs against a simulated S7 PLC (`npm test`).
 - build: Updated the development tooling to TypeScript 6, ESLint 10 and Prettier 3.
+- build: Removed ts-node. `npm run test:plc` runs the TypeScript source directly with Node.
 
 ## Breaking Changes
 
-- The compiled code in `lib/` now targets ES2022 instead of ES5. Requires Node.js 16.11 or newer.
+- The package is now ESM-only (`"type": "module"`), compiled to ES2022 instead of ES5 CommonJS. CommonJS projects can still use `require('nodes7comm')` thanks to Node's support for `require()` of ES modules.
+- Requires Node.js `^20.19.0 || >=22.12.0` (declared in `engines`).
+- Added an `exports` map: only the package root can be imported. Deep imports such as `nodes7comm/lib/...` no longer work.
+- TypeScript users need TypeScript 5.0 or newer, or 5.8 or newer when importing from CommonJS files with `"module": "nodenext"`.
 
 
 ### v2.0.0
