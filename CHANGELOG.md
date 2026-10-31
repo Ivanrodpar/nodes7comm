@@ -1,3 +1,13 @@
+### Unreleased
+
+- test: Added an automated test suite that runs against a simulated S7 PLC (`npm test`).
+- build: Updated the development tooling to TypeScript 6, ESLint 10 and Prettier 3.
+
+## Breaking Changes
+
+- The compiled code in `lib/` now targets ES2022 instead of ES5. Requires Node.js 16.11 or newer.
+
+
 ### v2.0.0
 
 - fix: Error with String data types.

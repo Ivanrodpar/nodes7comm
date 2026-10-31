@@ -36,7 +36,7 @@ Todo vive en una sola clase, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 líneas), 
 - `test/helpers/fake-plc.ts` simula un PLC: memoria por área y DB (`plc.db(1)`, `plc.area(AREA.M)`), registro de lo que recibe (`plc.jobs`, `plc.connectionRequests`) e interruptores de fallo (`silent`, `responseDelay`, `splitResponses`, `itemReturnCode`, `invalidPduReply`, `ignoreConnectionRequests`, `pduSize`, `maxParallel`). No simula timers ni counters.
 - Crea los clientes con `connectClient`/`createClient` (por defecto `autoReconnect: false`) y llama a `disposeClients()` en `afterEach`. Mientras no exista un `disconnect()` público, ese helper cierra el socket accediendo al estado privado del cliente.
 - Espera (`await`) todas las promesas del cliente: un rechazo sin manejar tira el proceso del test.
-- Los tests existentes fijan el comportamiento **actual**, incluso el raro (por ejemplo, que el rechazo por timeout sea el string `'Timeout'`, o que `readAllTags()` sin tags devuelva `[]`). Si un cambio rompe uno de ellos, es un cambio de API: decide si va a un major.
+- Los tests existentes fijan el comportamiento **actual**, incluso el raro (por ejemplo, que el rechazo por timeout sea el string `'Timeout'`, o que `readAllTags()` sin tags devuelva `[]`). Si un cambio rompe uno de ellos, es un cambio de API: está permitido porque el próximo release es la 3.0.0, pero tiene que ser intencional. Actualiza el test y anótalo en `## Breaking Changes` de `Unreleased`.
 
 ## Deuda conocida (verificada el 2026-10-31; actualiza esta lista al corregir cada punto)
 
@@ -69,11 +69,11 @@ Cada bug tiene un test en `test/known-bugs.test.ts` que describe el comportamien
 - Código y comentarios en inglés. Prettier usa 4 espacios, comillas simples y `printWidth: 1200`: las líneas largas son intencionales, no las partas a mano.
 - Commits estilo Conventional Commits (`fix:`, `feat:`, `docs:`, `build:`, `release:`).
 - Se trabaja en `dev` y se integra en `master`.
-- `CHANGELOG.md` se mantiene a mano, con una sección "Breaking Changes" cuando aplica.
-- La API pública sigue semver; cambiar una firma o un tipo de retorno es un cambio major. Esa API son los métodos `initiateConnection`, `readTags`, `writeTags`, `addTags`, `removeTags`, `readAllTags`, `addTranslationTags` y `deleteTranslationTag`, y los eventos `connected`, `connect-timeout`, `disconnected` y `error`.
+- `CHANGELOG.md` se mantiene a mano. Cada cambio se anota en la sección `### Unreleased` (arriba de todo) en el mismo commit que lo introduce, con el prefijo de su tipo (`fix:`, `feat:`...). Lo que rompe compatibilidad va en su `## Breaking Changes`. Al publicar, `Unreleased` se renombra a la versión.
+- El próximo release será la **3.0.0**: no habrá ninguna 2.x más. Se permiten cambios incompatibles en la API pública si son intencionales, y cada uno se anota en `## Breaking Changes` de `Unreleased`, porque la v3 necesitará una guía de migración. La API pública son los métodos `initiateConnection`, `readTags`, `writeTags`, `addTags`, `removeTags`, `readAllTags`, `addTranslationTags` y `deleteTranslationTag`, y los eventos `connected`, `connect-timeout`, `disconnected` y `error`.
 
 ## Publicación
 
 - `package.json` tiene `"files": ["lib"]`, así que solo se publican `lib/`, README, LICENSE y package.json (ni este archivo ni `test/`).
 - No hay `prepublishOnly`: corre `npm run build` antes de `npm publish`, o se publicará un `lib/` viejo.
-- La 2.0.0 se publicó compilada a ES5. Desde la actualización de herramientas, `lib/` sale en ES2022, que requiere Node ≥16.11 en quien instala. Anótalo en el CHANGELOG del próximo release y considera agregar `engines`.
+- La 2.0.0 se publicó compilada a ES5. Desde la actualización de herramientas, `lib/` sale en ES2022, que requiere Node ≥16.11 en quien instala (ya anotado en `Unreleased` como breaking). Considera agregar `engines`.
