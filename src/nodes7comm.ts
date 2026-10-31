@@ -1,3 +1,4 @@
+/// <reference types="node" preserve="true" />
 import { Socket } from 'net';
 import { format } from 'util';
 import { EventEmitter } from 'stream';
@@ -8,11 +9,14 @@ import { Address } from './types/address.types';
 import { NodeS7CommEvents } from './types/nodes7comm-events.types';
 import { getEmptyAddress, getEmptyS7ItemWrite } from './address';
 
+// Typed events. `extends EventEmitter<Events>` would replace this merge, but consumers on an older @types/node (non-generic EventEmitter) would break.
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export declare interface NodeS7Comm {
     on<U extends keyof NodeS7CommEvents>(event: U, listener: NodeS7CommEvents[U]): this;
     emit<U extends keyof NodeS7CommEvents>(event: U, ...args: Parameters<NodeS7CommEvents[U]>): boolean;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class NodeS7Comm extends EventEmitter {
     private readonly writeReqHeader = Buffer.from([0x03, 0x00, 0x00, 0x1f, 0x02, 0xf0, 0x80, 0x32, 0x01, 0x00, 0x00, 0x08, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x05, 0x01]);
     private readonly readReqHeader = Buffer.from([0x03, 0x00, 0x00, 0x1f, 0x02, 0xf0, 0x80, 0x32, 0x01, 0x00, 0x00, 0x08, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x04, 0x01]);
@@ -741,7 +745,6 @@ export class NodeS7Comm extends EventEmitter {
                 default:
                     this.outputLog('Unknown data type in write prepare - should never happen.  Should have been caught earlier.  ' + address.dataType, 1);
             }
-            thePointer += address.dataTypeLength;
         }
         return writeBuffer;
     }
@@ -1063,8 +1066,8 @@ export class NodeS7Comm extends EventEmitter {
 
     private BufferToAddressValue(address: Address, buffer: Buffer): string | number | boolean | undefined | (string | number | boolean)[] {
         let thePointer: number = 0;
-        let strlen: number = 0;
-        let tempString: string = '';
+        let strlen: number;
+        let tempString: string;
         let readValue: string | number | boolean | undefined | (string | number | boolean)[];
         let quality;
         if (address.arrayLength > 1) {
@@ -1156,7 +1159,6 @@ export class NodeS7Comm extends EventEmitter {
                 // theItem.readValue = theItem.badValue();
                 // theItem.quality = 'BAD ' + theItem.qualityBuffer[thePointer];
             } else {
-                quality = 'OK';
                 switch (address.dataType) {
                     case 'REAL':
                         readValue = buffer.readFloatBE(thePointer);
@@ -1209,12 +1211,6 @@ export class NodeS7Comm extends EventEmitter {
                         return 0;
                 }
             }
-            thePointer += address.dataTypeLength;
-        }
-
-        if (thePointer % 2) {
-            // Odd number.  With the S7 protocol we only request an even number of bytes.  So there will be a filler byte.
-            thePointer += 1;
         }
 
         //	outputLog("We have an item value of " + theItem.value + " for " + theItem.addr + " and pointer of " + thePointer);
@@ -1785,7 +1781,7 @@ export class NodeS7Comm extends EventEmitter {
             this.initS7commListeners();
             this.emit('connected');
         } catch (err) {
-            this.emit('error', err);
+            this.emit('error', err as Error);
         }
     }
 

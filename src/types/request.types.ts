@@ -1,3 +1,4 @@
+/// <reference types="node" preserve="true" />
 import { Address } from './address.types';
 
 export interface SendReadRequest {

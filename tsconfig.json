@@ -1,12 +1,9 @@
 {
   "compilerOptions": {
-    "target": "es5",
-    "module": "commonjs",
-    "moduleResolution": "node",
-    "esModuleInterop": true,
+    "target": "es2022",
+    "module": "nodenext",
     "lib": [
-      "es2015",
-      "es2016"
+      "es2022"
     ],
     "types": [
       "node"
