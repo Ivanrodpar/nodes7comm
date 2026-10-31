@@ -953,13 +953,13 @@ export class NodeS7Comm extends EventEmitter {
     }
 
     private findReadIndexOfSeqNum(seqNum: number): number {
-        return this.sentReadPacketArray.findIndex((sentReadPacket) => {
+        return this.sentReadPacketArray.findIndex(sentReadPacket => {
             return sentReadPacket.seqNum == seqNum;
         });
     }
 
     private findWriteIndexOfSeqNum(seqNum: number): number {
-        return this.sentWritePacketArray.findIndex((sentWritePacket) => {
+        return this.sentWritePacketArray.findIndex(sentWritePacket => {
             return sentWritePacket.seqNum == seqNum;
         });
     }
@@ -1219,7 +1219,7 @@ export class NodeS7Comm extends EventEmitter {
 
     private checkReadResponseParts(readRequestSequence: number): boolean {
         // Check in array of sentReadPacketArray if we received all parts of the same sequence
-        const waitingReadPackets = this.sentReadPacketArray.filter((sentReadPacket) => {
+        const waitingReadPackets = this.sentReadPacketArray.filter(sentReadPacket => {
             return sentReadPacket.readRequestSequence === readRequestSequence && !sentReadPacket.rcvd;
         });
         return !!waitingReadPackets.length;
@@ -1227,7 +1227,7 @@ export class NodeS7Comm extends EventEmitter {
 
     private checkWriteResponseParts(writeRequestSequence: number): boolean {
         // Check in array of sentWritePacketArray if we received all parts of the same sequence
-        const waitingWritePackets = this.sentWritePacketArray.filter((sentWritePacket) => {
+        const waitingWritePackets = this.sentWritePacketArray.filter(sentWritePacket => {
             return sentWritePacket.writeRequestSequence === writeRequestSequence && !sentWritePacket.rcvd;
         });
         return !!waitingWritePackets.length;
@@ -2336,7 +2336,7 @@ export class NodeS7Comm extends EventEmitter {
         this.sendReadPacket(preparedReadRequest); // Note this sends the first few read packets depending on parallel connection restrictions.
 
         // We return a `Promise.all` of promises created to be resolved or rejected
-        return Promise.all(promises).then((values) => {
+        return Promise.all(promises).then(values => {
             return Object.assign({}, ...values);
         });
     }
@@ -2390,7 +2390,7 @@ export class NodeS7Comm extends EventEmitter {
         this.sendWritePacket(writePacketArray);
 
         // We return a `Promise.all` of promises created to be resolved or rejected
-        return Promise.all(promises).then((values) => {
+        return Promise.all(promises).then(values => {
             return Object.assign({}, ...values);
         });
     }

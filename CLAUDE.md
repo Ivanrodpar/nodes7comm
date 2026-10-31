@@ -6,7 +6,7 @@ Librería TypeScript publicada en npm para comunicarse con PLCs Siemens S7-300/4
 
 - `npm run build`: compila `src/` → `lib/` con `tsc` (`lib/` está en `.gitignore`).
 - `npx tsc --noEmit`: type-check.
-- `npm run lint`: ESLint 10 con flat config (`eslint.config.mjs`), con typescript-eslint y prettier como regla.
+- `npm run lint`: ESLint 10 con flat config (`eslint.config.js`), con typescript-eslint y prettier como regla. Revisa los `.ts` y también los `.js` de configuración.
 - `npm test`: compila y corre la suite de `test/` con `node:test` contra un PLC simulado. Tarda menos de 1 s.
 - Un solo archivo o test: `npx tsc && node --test --test-name-pattern="<nombre>" test/<archivo>.test.ts`.
 - `npm run test:plc`: ejecuta directamente con Node (sin compilar) el script manual `src/test/test.ts` contra un PLC real en `192.168.1.200`. **Escribe en el PLC**: no lo ejecutes sin que el autor lo pida. Con `autoReconnect` reintenta en bucle si no hay PLC.
@@ -75,7 +75,8 @@ Cada bug tiene un test en `test/known-bugs.test.ts` que describe el comportamien
 
 ## Convenciones
 
-- Código y comentarios en inglés. Prettier usa 4 espacios, comillas simples y `printWidth: 1200`: las líneas largas son intencionales, no las partas a mano.
+- Código y comentarios en inglés. Prettier usa 4 espacios, comillas simples, `arrowParens: 'avoid'` y `printWidth: 1200`: las líneas largas son intencionales, no las partas a mano.
+- `.prettierrc.js` y `eslint.config.js` son copias exactas de la configuración que el autor usa en sus otros proyectos. Mantenlos iguales a esa fuente: no los ajustes solo para este repo sin preguntar.
 - Commits estilo Conventional Commits (`fix:`, `feat:`, `docs:`, `build:`, `release:`).
 - Se trabaja en `dev` y se integra en `master`.
 - `CHANGELOG.md` se mantiene a mano. Cada cambio se anota en la sección `### Unreleased` (arriba de todo) en el mismo commit que lo introduce, con el prefijo de su tipo (`fix:`, `feat:`...). Lo que rompe compatibilidad va en su `## Breaking Changes`. Al publicar, `Unreleased` se renombra a la versión.

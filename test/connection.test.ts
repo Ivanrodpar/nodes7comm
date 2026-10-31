@@ -63,7 +63,7 @@ describe('connection', () => {
         const client = await connectClient(plc, { requestTimeout: 100 });
         const disconnected = once(client, 'disconnected');
         plc.silent = true;
-        await assert.rejects(client.readTags('MB0'), (reason) => reason === 'Timeout');
+        await assert.rejects(client.readTags('MB0'), reason => reason === 'Timeout');
         const [message] = await disconnected;
         assert.match(message, /Read timeout/);
     });
@@ -72,7 +72,7 @@ describe('connection', () => {
         const client = await connectClient(plc, { requestTimeout: 100 });
         const disconnected = once(client, 'disconnected');
         plc.silent = true;
-        await assert.rejects(client.writeTags('MB0', 1), (reason) => reason === 'Timeout');
+        await assert.rejects(client.writeTags('MB0', 1), reason => reason === 'Timeout');
         const [message] = await disconnected;
         assert.match(message, /Write timeout/);
     });

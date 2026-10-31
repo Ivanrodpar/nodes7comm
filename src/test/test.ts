@@ -8,7 +8,7 @@ async function test(): Promise<void> {
     const s7Client = new NodeS7Comm(options);
     try {
         s7Client.initiateConnection();
-        s7Client.on('error', (err) => {
+        s7Client.on('error', err => {
             console.log('onError', err);
         });
         s7Client.on('disconnected', () => {

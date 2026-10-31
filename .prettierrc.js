@@ -5,4 +5,5 @@ export default {
     printWidth: 1200,
     tabWidth: 4,
     endOfLine: 'auto',
+    arrowParens: 'avoid',
 };

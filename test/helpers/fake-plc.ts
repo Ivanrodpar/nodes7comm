@@ -48,7 +48,7 @@ export class FakePlc {
     inFlight = 0;
     maxInFlight = 0;
 
-    private readonly server: Server = createServer((socket) => this.onConnection(socket));
+    private readonly server: Server = createServer(socket => this.onConnection(socket));
     private readonly sockets = new Set<Socket>();
     private readonly timers = new Set<NodeJS.Timeout>();
     private readonly memory = new Map<string, Buffer>();
@@ -71,7 +71,7 @@ export class FakePlc {
         for (const socket of this.sockets) {
             socket.destroy();
         }
-        await new Promise<void>((resolve) => this.server.close(() => resolve()));
+        await new Promise<void>(resolve => this.server.close(() => resolve()));
     }
 
     // Memory of an area. The DB number only matters for AREA.DB.
@@ -306,6 +306,6 @@ export async function getClosedPort(): Promise<number> {
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     const { port } = server.address() as AddressInfo;
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>(resolve => server.close(() => resolve()));
     return port;
 }
