@@ -5,7 +5,8 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
-    "test": "ts-node src/test/test.ts"
+    "test": "npm run build && node --test --test-timeout=10000 \"test/**/*.test.ts\"",
+    "test:plc": "ts-node src/test/test.ts"
   },
   "files": [
     "lib"
