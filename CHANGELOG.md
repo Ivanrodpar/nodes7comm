@@ -2,7 +2,7 @@
 
 - test: Added an automated test suite that runs against a simulated S7 PLC (`npm test`).
 - build: Updated the development tooling to TypeScript 6, ESLint 10 and Prettier 3.
-- build: Removed ts-node. `npm run test:plc` runs the TypeScript source directly with Node.
+- build: Removed ts-node and the manual `src/test/test.ts` script that ran against a real PLC; the automated suite replaces it.
 
 ## Breaking Changes
 

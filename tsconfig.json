@@ -18,8 +18,7 @@
   },
   "exclude": [
     "lib",
-    "node_modules",
-    "src/test/**.ts"
+    "node_modules"
   ],
   "include": [
     "src/**.ts",

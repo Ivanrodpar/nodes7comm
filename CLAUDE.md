@@ -9,8 +9,8 @@ Librería TypeScript publicada en npm para comunicarse con PLCs Siemens S7-300/4
 - `npm run lint`: ESLint 10 con flat config (`eslint.config.js`), con typescript-eslint y prettier como regla. Revisa los `.ts` y también los `.js` de configuración.
 - `npm test`: compila y corre la suite de `test/` con `node:test` contra un PLC simulado. Tarda menos de 1 s.
 - Un solo archivo o test: `npx tsc && node --test --test-name-pattern="<nombre>" test/<archivo>.test.ts`.
-- `npm run test:plc`: ejecuta directamente con Node (sin compilar) el script manual `src/test/test.ts` contra un PLC real en `192.168.1.200`. **Escribe en el PLC**: no lo ejecutes sin que el autor lo pida. Con `autoReconnect` reintenta en bucle si no hay PLC.
-- Para desarrollar hace falta Node ≥22.18, que ejecuta TypeScript sin compilar, y es lo que usan los tests y `test:plc`. Quien instala el paquete solo necesita lo que dice `engines`.
+- Para desarrollar hace falta Node ≥22.18, que ejecuta TypeScript sin compilar y es lo que usan los tests. Quien instala el paquete solo necesita lo que dice `engines`.
+- No hay script para probar contra un PLC real. Las pruebas con hardware las hace el autor en sus propios proyectos, que usan esta librería.
 
 ## Arquitectura
 

@@ -17,8 +17,7 @@
   "scripts": {
     "build": "tsc",
     "lint": "eslint .",
-    "test": "npm run build && node --test --test-timeout=10000 \"test/**/*.test.ts\"",
-    "test:plc": "node src/test/test.ts"
+    "test": "npm run build && node --test --test-timeout=10000 \"test/**/*.test.ts\""
   },
   "files": [
     "lib"
