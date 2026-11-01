@@ -1,90 +1,90 @@
 # nodes7comm
 
-Librería TypeScript publicada en npm para comunicarse con PLCs Siemens S7-300/400/1200/1500 usando el protocolo S7 sobre ISO-on-TCP (puerto 102). Es un port de [nodeS7](https://github.com/plcpeople/nodeS7). No tiene dependencias de runtime y debe seguir así.
+TypeScript library published on npm to communicate with Siemens S7-300/400/1200/1500 PLCs using the S7 protocol over ISO-on-TCP (port 102). It is a port of [nodeS7](https://github.com/plcpeople/nodeS7). It has no runtime dependencies and must stay that way.
 
-## Comandos
+## Commands
 
-- `npm run build`: compila `src/` → `lib/` con `tsc` (`lib/` está en `.gitignore`).
+- `npm run build`: compiles `src/` → `lib/` with `tsc` (`lib/` is in `.gitignore`).
 - `npx tsc --noEmit`: type-check.
-- `npm run lint`: ESLint 10 con flat config (`eslint.config.js`), con typescript-eslint y prettier como regla. Revisa los `.ts` y también los `.js` de configuración.
-- `npm test`: compila y corre la suite de `test/` con `node:test` contra un PLC simulado. Tarda menos de 1 s.
-- Un solo archivo o test: `npx tsc && node --test --test-name-pattern="<nombre>" test/<archivo>.test.ts`.
-- Para desarrollar hace falta Node ≥22.18, que ejecuta TypeScript sin compilar y es lo que usan los tests. Quien instala el paquete solo necesita lo que dice `engines`.
-- No hay script para probar contra un PLC real. Las pruebas con hardware las hace el autor en sus propios proyectos, que usan esta librería.
+- `npm run lint`: ESLint 10 with flat config (`eslint.config.js`), typescript-eslint, and prettier as a rule. It checks the `.ts` files and the `.js` config files.
+- `npm test`: builds and runs the `test/` suite with `node:test` against a simulated PLC. Takes less than 1 s.
+- A single file or test: `npx tsc && node --test --test-name-pattern="<name>" test/<file>.test.ts`.
+- Development needs Node ≥22.18, which runs TypeScript without compiling; the tests rely on it. People installing the package only need what `engines` says.
+- There is no script to test against a real PLC. Hardware testing happens in the author's own projects that use this library.
 
-## Arquitectura
+## Architecture
 
-Todo vive en una sola clase, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 líneas), que extiende `EventEmitter`. Los tipos internos están en `src/types/`. `src/index.ts` solo exporta `NodeS7Comm` y `Nodes7CommConfig`; todo lo demás es privado. La clase se mantiene en un solo archivo por decisión del autor: no propongas dividirla en módulos.
+Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lines), which extends `EventEmitter`. Internal types are in `src/types/`. `src/index.ts` only exports `NodeS7Comm` and `Nodes7CommConfig`; everything else is private. The class stays in a single file by the author's decision: don't propose splitting it into modules.
 
-**Conexión** (`connectNow`): TCP (`initTCPConnect`) → COTP connection request/confirm (`initISOConnect` / `onISOConnectReply`) → negociación de PDU (`initPDUConnect` / `onPDUReply`, que fija `maxPDU` y `maxParallel`) → estado `s7comm` → evento `connected`.
+**Connection** (`connectNow`): TCP (`initTCPConnect`) → COTP connection request/confirm (`initISOConnect` / `onISOConnectReply`) → PDU negotiation (`initPDUConnect` / `onPDUReply`, which sets `maxPDU` and `maxParallel`) → `s7comm` state → `connected` event.
 
-**Lectura**: `readTags` → `stringToS7Addr` (parsea direcciones como `DB1,REAL4` o `M0.0`) → `prepareReadPacket` (ordena, agrupa direcciones cercanas si `optimize`, parte los bloques mayores que `maxByteRequest` en varias *parts* con el mismo `readRequestSequence` y empaqueta lo que cabe en el PDU) → `sendReadPacket` (respeta `maxParallel`; el resto va a `requestQueue`) → `onResponse` → `readResponse` → `BufferToAddressValue`. Cada dirección guarda su propio `promiseResolve`/`promiseReject`, y `readTags` devuelve un `Promise.all` de todas.
+**Reading**: `readTags` → `stringToS7Addr` (parses addresses such as `DB1,REAL4` or `M0.0`) → `prepareReadPacket` (sorts, groups nearby addresses when `optimize` is on, splits blocks larger than `maxByteRequest` into several *parts* sharing a `readRequestSequence`, and packs what fits in the PDU) → `sendReadPacket` (respects `maxParallel`; the rest goes to `requestQueue`) → `onResponse` → `readResponse` → `BufferToAddressValue`. Each address keeps its own `promiseResolve`/`promiseReject`, and `readTags` returns a `Promise.all` of them.
 
-**Escritura**: mismo patrón con `prepareWritePacket` / `bufferizeValue` / `sendWritePacket` / `writeResponse`.
+**Writing**: same pattern with `prepareWritePacket` / `bufferizeValue` / `sendWritePacket` / `writeResponse`.
 
-## Cuidado con el protocolo
+## Protocol caveats
 
-- Los offsets y números mágicos (`dataPointer = 21`, las cabeceras `readReqHeader`/`writeReqHeader`/`connectReq`/`negotiatePDU`, los bytes de relleno para longitudes impares, `maxByteRequest = 4 * floor((maxPDU - 18) / 4)`) vienen de nodeS7 y del protocolo. No los "limpies" sin una prueba que cubra el caso.
-- Los números de secuencia se reinician al pasar 32767.
-- Un S7-1200/300 suele negociar PDU 240 (~220 bytes útiles por item) y un S7-1500, 960. Prueba con ambos tamaños.
+- The offsets and magic numbers (`dataPointer = 21`, the `readReqHeader`/`writeReqHeader`/`connectReq`/`negotiatePDU` headers, the fill bytes for odd lengths, `maxByteRequest = 4 * floor((maxPDU - 18) / 4)`) come from nodeS7 and the protocol. Don't "clean them up" without a test that covers the case.
+- Sequence numbers wrap after 32767.
+- An S7-1200/300 usually negotiates a PDU of 240 (~220 usable bytes per item) and an S7-1500 one of 960. Test with both sizes.
 
 ## Tests
 
-- Usan el runner que trae Node (`node:test` + `node:assert/strict`), sin dependencias.
-- Están escritos en TypeScript y Node los ejecuta quitando los tipos, así que solo se admite sintaxis "borrable": nada de `enum`, `namespace` ni parameter properties; los imports de tipos van con `import type`, y los imports relativos llevan la extensión `.ts`. `tsc` todavía no los revisa (solo compila `src/`).
-- Importan el `lib/` **compilado** (`../lib/index.js`), así que prueban lo que se publica. Por eso `npm test` compila primero.
-- `test/helpers/fake-plc.ts` simula un PLC: memoria por área y DB (`plc.db(1)`, `plc.area(AREA.M)`), registro de lo que recibe (`plc.jobs`, `plc.connectionRequests`) e interruptores de fallo (`silent`, `responseDelay`, `splitResponses`, `itemReturnCode`, `invalidPduReply`, `ignoreConnectionRequests`, `pduSize`, `maxParallel`). No simula timers ni counters.
-- Crea los clientes con `connectClient`/`createClient` (por defecto `autoReconnect: false`) y llama a `disposeClients()` en `afterEach`. Mientras no exista un `disconnect()` público, ese helper cierra el socket accediendo al estado privado del cliente.
-- Espera (`await`) todas las promesas del cliente: un rechazo sin manejar tira el proceso del test.
-- Los tests existentes fijan el comportamiento **actual**, incluso el raro (por ejemplo, que el rechazo por timeout sea el string `'Timeout'`, o que `readAllTags()` sin tags devuelva `[]`). Si un cambio rompe uno de ellos, es un cambio de API: está permitido porque el próximo release es la 3.0.0, pero tiene que ser intencional. Actualiza el test y anótalo en `## Breaking Changes` de `Unreleased`.
+- They use Node's built-in runner (`node:test` + `node:assert/strict`), with no dependencies.
+- They are written in TypeScript and Node runs them by stripping the types, so only erasable syntax is allowed: no `enum`, `namespace` or parameter properties; type imports use `import type`, and relative imports include the `.ts` extension. `tsc` doesn't check them yet (it only compiles `src/`).
+- They import the **compiled** `lib/` (`../lib/index.js`), so they test what gets published. That's why `npm test` builds first.
+- `test/helpers/fake-plc.ts` simulates a PLC: memory per area and DB (`plc.db(1)`, `plc.area(AREA.M)`), a log of what it receives (`plc.jobs`, `plc.connectionRequests`), and fault switches (`silent`, `responseDelay`, `splitResponses`, `itemReturnCode`, `invalidPduReply`, `ignoreConnectionRequests`, `pduSize`, `maxParallel`). It doesn't simulate timers or counters.
+- Create clients with `connectClient`/`createClient` (`autoReconnect: false` by default) and call `disposeClients()` in `afterEach`. Until there is a public `disconnect()`, that helper closes the socket by reaching into the client's private state.
+- Await every client promise: an unhandled rejection crashes the test process.
+- The existing tests pin the **current** behaviour, including the odd parts (for example, that a timeout rejects with the string `'Timeout'`, or that `readAllTags()` with no tags resolves to `[]`). If a change breaks one of them, it is an API change: that's allowed because the next release is 3.0.0, but it must be intentional. Update the test and record it under `## Breaking Changes` in `Unreleased`.
 
-## Deuda conocida (verificada el 2026-10-31; actualiza esta lista al corregir cada punto)
+## Known issues (verified on 2026-10-31; update this list as each one is fixed)
 
-Cada bug tiene un test en `test/known-bugs.test.ts` que describe el comportamiento correcto y está en *skip*. Para corregir uno: ejecuta su test con `RUN_KNOWN_BUGS=1` y `--test-name-pattern` (de uno en uno, porque varios tiran el proceso), arregla el código, quita el `knownBug(...)` del test y bórralo de esta lista.
+Each bug has a test in `test/known-bugs.test.ts` that describes the correct behaviour and is skipped. To fix one: run its test with `RUN_KNOWN_BUGS=1` and `--test-name-pattern` (one at a time, because several crash the process), fix the code, remove the `knownBug(...)` from the test and delete the entry from this list.
 
-- Leer un solo tag mayor que `maxByteRequest` (por ejemplo `DB1,S0.254` con PDU 240) tira el proceso con un `TypeError`, porque `readResponse` usa `sentWritePacketArray` en la rama de lectura multiparte. Además, `checkReadResponseParts`/`checkWriteResponseParts` devuelven la condición invertida y el buffer de ensamblado usa `dataTypeLength` en vez de `byteLength`.
-- Escribir un solo tag mayor que el PDU rechaza con `'Invalid response'`. Luego, cuando vence el timeout de la segunda parte, tira el proceso (`packetTimeout` → `writeResponse(undefined, -1)`).
-- `addTags([...])` con tags ya existentes hace `splice(index, 1)` con el índice del array equivocado: muta el array de quien llama, duplica tags y se salta otros.
-- `connectNow` no hace `await` a `onPDUReply`. Un PDU inválido produce un unhandled rejection (que tira el proceso) y aun así se emite `connected`.
-- Con `autoReconnect`, un `ECONNREFUSED` reconecta sin ninguna espera y genera miles de eventos `error` por segundo.
-- `onResponse` asume que cada evento `data` del socket trae paquetes completos. Si una respuesta llega partida en dos segmentos TCP, desconecta y el request termina en `'Timeout'`.
-- `DB12,D40`, la forma que documenta el README para DWord, rechaza con `Unknown data type: D`. Además, el README pone ejemplos de DInt (`ID140`, `MD100`, `DB2,D100`) que en realidad son DWord o no funcionan; lo correcto es `IDI`/`MDI`/`DB2,DI100`.
-- `DB1,STRING0.10` (con `STRING` en vez de `S`) calcula una longitud de 0 bytes, no envía nada y la promesa nunca se resuelve.
-- `writeTags('DB1,INT0.3', [-1, 0, 1])` (un tag como string y el array como valor) escribe ceros. Solo funciona `writeTags(['DB1,INT0.3'], [[-1, 0, 1]])`.
-- `bufferizeValue` usa `writeInt32BE` para arrays DWORD, así que valores ≥ 2^31 rechazan con `RangeError`.
-- Sin verificar: en `S7AddrToBuffer` la rama de timers/counters compara `address.Type === 'TIMER'`, pero `Type` vale `'T'`/`'C'`, así que esa rama nunca se ejecuta.
-- No hay un método público para desconectar.
-- Las promesas se rechazan con strings (`'Timeout'`), no con `Error`.
+- Reading a single tag larger than `maxByteRequest` (for example `DB1,S0.254` with PDU 240) crashes the process with a `TypeError`, because `readResponse` uses `sentWritePacketArray` in the multi-part read branch. Also, `checkReadResponseParts`/`checkWriteResponseParts` return the inverted condition, and the reassembly buffer uses `dataTypeLength` instead of `byteLength`.
+- Writing a single tag larger than the PDU rejects with `'Invalid response'`. Then, when the second part's timeout fires, it crashes the process (`packetTimeout` → `writeResponse(undefined, -1)`).
+- `addTags([...])` with tags that are already stored calls `splice(index, 1)` with the index of the wrong array: it mutates the caller's array, duplicates tags and skips others.
+- `connectNow` doesn't `await` `onPDUReply`. An invalid PDU produces an unhandled rejection (which crashes the process), and `connected` is emitted anyway.
+- With `autoReconnect`, an `ECONNREFUSED` reconnects without any delay and produces thousands of `error` events per second.
+- `onResponse` assumes each socket `data` event contains complete packets. If a response arrives split across two TCP segments, it disconnects and the request ends with `'Timeout'`.
+- `DB12,D40`, the form the README documents for DWord, rejects with `Unknown data type: D`. The README also shows DInt examples (`ID140`, `MD100`, `DB2,D100`) that are actually DWord or don't work; the correct forms are `IDI`/`MDI`/`DB2,DI100`.
+- `DB1,STRING0.10` (with `STRING` instead of `S`) computes a length of 0 bytes, sends nothing, and the promise never settles.
+- `writeTags('DB1,INT0.3', [-1, 0, 1])` (a single tag as a string with an array value) writes zeros. Only `writeTags(['DB1,INT0.3'], [[-1, 0, 1]])` works.
+- `bufferizeValue` uses `writeInt32BE` for DWORD arrays, so values ≥ 2^31 reject with a `RangeError`.
+- Unverified: in `S7AddrToBuffer`, the timer/counter branch compares `address.Type === 'TIMER'`, but `Type` is `'T'`/`'C'`, so that branch never runs.
+- There is no public method to disconnect.
+- Promises reject with strings (`'Timeout'`), not with `Error`.
 
-## Herramientas (actualizadas el 2026-10-31)
+## Tooling (updated on 2026-10-31)
 
-- TypeScript está fijado en `~6.0.x` a propósito: typescript-eslint 8 solo soporta `typescript <6.1.0`, y TypeScript 7 (el compilador en Go) todavía no es compatible. Antes de subirlo, revisa el `peerDependencies` de `typescript-eslint`.
-- El paquete es **solo ESM** (`"type": "module"`); no hay build CommonJS. Quien usa CommonJS hace `require()` del ESM, que Node soporta desde 20.19 / 22.12.
-- `tsconfig.json` compila a ES2022 con `module: nodenext`, más `verbatimModuleSyntax`, `erasableSyntaxOnly` y `rewriteRelativeImportExtensions`. Esto obliga a tres cosas en `src/`:
-  - los imports relativos llevan la extensión `.ts` (`tsc` la reescribe a `.js` en `lib/`);
-  - lo que solo es tipo se importa con `import type`;
-  - nada de sintaxis que Node no pueda borrar (`enum`, `namespace`, parameter properties).
+- TypeScript is pinned to `~6.0.x` on purpose: typescript-eslint 8 only supports `typescript <6.1.0`, and TypeScript 7 (the Go compiler) isn't supported yet. Before bumping it, check the `peerDependencies` of `typescript-eslint`.
+- The package is **ESM-only** (`"type": "module"`); there is no CommonJS build. CommonJS users `require()` the ESM build, which Node supports since 20.19 / 22.12.
+- `tsconfig.json` compiles to ES2022 with `module: nodenext`, plus `verbatimModuleSyntax`, `erasableSyntaxOnly` and `rewriteRelativeImportExtensions`. This enforces three things in `src/`:
+  - relative imports include the `.ts` extension (`tsc` rewrites it to `.js` in `lib/`);
+  - type-only imports use `import type`;
+  - no syntax that Node can't strip (`enum`, `namespace`, parameter properties).
 
-  Gracias a eso Node puede ejecutar `src/` sin compilar.
-- Los `.d.ts` de `lib/` conservan los `.ts` en sus imports (TS no los reescribe). Funciona para quien instala con TS ≥5.0; con TS 4.9 los tipos quedan como `any`. Verificado el 2026-10-31 con TS 4.9, 5.0, 5.4, 5.7, 5.8 y 6.0, en los modos `nodenext` (ESM y CommonJS), `bundler` y `node10`. CommonJS con `nodenext` necesita TS ≥5.8, como cualquier paquete solo-ESM.
-- `EventEmitter` se importa de `'events'`. En ESM, `import { EventEmitter } from 'stream'` falla: solo funcionaba en CommonJS, por herencia.
-- `.prettierrc.js` es ESM (`export default`), porque el paquete es `"type": "module"`.
-- `src/nodes7comm.ts` y `src/types/request.types.ts` tienen `/// <reference types="node" preserve="true" />`. No la quites: sin ella, los `.d.ts` publicados pierden la referencia a `@types/node` (TS ≥5.5 ya no la genera).
-- La fusión interfaz + clase de `NodeS7Comm` (eventos tipados) tiene `eslint-disable` a propósito; reemplazarla por `EventEmitter<Events>` cambia los tipos públicos.
-- `npm audit` reporta avisos solo en `minimatch`, que traen ESLint y typescript-eslint y que todavía no tiene arreglo publicado. Son herramientas de desarrollo y no se publican.
+  As a result, Node can also run `src/` without compiling.
+- The `.d.ts` files in `lib/` keep the `.ts` extensions in their imports (TS doesn't rewrite them). This works for consumers on TS ≥5.0; on TS 4.9 the types degrade to `any`. Verified on 2026-10-31 with TS 4.9, 5.0, 5.4, 5.7, 5.8 and 6.0, in `nodenext` (ESM and CommonJS), `bundler` and `node10` modes. CommonJS with `nodenext` needs TS ≥5.8, as with any ESM-only package. Switching to `.js` specifiers was considered and rejected: it would only add support for TS 4.7–4.9, which are unmaintained.
+- `EventEmitter` is imported from `'events'`. In ESM, `import { EventEmitter } from 'stream'` fails: it only worked in CommonJS, through inheritance.
+- `.prettierrc.js` is ESM (`export default`) because the package is `"type": "module"`.
+- `src/nodes7comm.ts` and `src/types/request.types.ts` have `/// <reference types="node" preserve="true" />`. Don't remove it: without it, the published `.d.ts` files lose their reference to `@types/node` (TS ≥5.5 no longer emits it).
+- The interface + class merge of `NodeS7Comm` (typed events) has an `eslint-disable` on purpose; replacing it with `EventEmitter<Events>` changes the public types.
+- `npm audit` only reports warnings in `minimatch`, pulled in by ESLint and typescript-eslint, with no published fix yet. These are development tools and are not published.
 
-## Convenciones
+## Conventions
 
-- Código y comentarios en inglés. Prettier usa 4 espacios, comillas simples, `arrowParens: 'avoid'` y `printWidth: 1200`: las líneas largas son intencionales, no las partas a mano.
-- `.prettierrc.js` y `eslint.config.js` son copias exactas de la configuración que el autor usa en sus otros proyectos. Mantenlos iguales a esa fuente: no los ajustes solo para este repo sin preguntar.
-- Commits estilo Conventional Commits (`fix:`, `feat:`, `docs:`, `build:`, `release:`).
-- Se trabaja en `dev` y se integra en `master`.
-- `CHANGELOG.md` se mantiene a mano. Cada cambio se anota en la sección `### Unreleased` (arriba de todo) en el mismo commit que lo introduce, con el prefijo de su tipo (`fix:`, `feat:`...). Lo que rompe compatibilidad va en su `## Breaking Changes`. Al publicar, `Unreleased` se renombra a la versión.
-- El próximo release será la **3.0.0**: no habrá ninguna 2.x más. Se permiten cambios incompatibles en la API pública si son intencionales, y cada uno se anota en `## Breaking Changes` de `Unreleased`, porque la v3 necesitará una guía de migración. La API pública son los métodos `initiateConnection`, `readTags`, `writeTags`, `addTags`, `removeTags`, `readAllTags`, `addTranslationTags` y `deleteTranslationTag`, y los eventos `connected`, `connect-timeout`, `disconnected` y `error`.
+- Code and comments in English. Prettier uses 4 spaces, single quotes, `arrowParens: 'avoid'` and `printWidth: 1200`: long lines are intentional, don't wrap them by hand.
+- `.prettierrc.js` and `eslint.config.js` are exact copies of the configuration used in the author's other projects. Keep them identical to that source: don't tweak them just for this repo without asking.
+- Conventional Commits (`fix:`, `feat:`, `docs:`, `build:`, `test:`, `style:`, `release:`).
+- Work happens on `dev` and is merged into `master`.
+- `CHANGELOG.md` is maintained by hand. Each change goes in the `### Unreleased` section (at the top) in the same commit that introduces it, prefixed with its type (`fix:`, `feat:`...). Breaking changes go under its `## Breaking Changes`. On release, `Unreleased` is renamed to the version.
+- The next release will be **3.0.0**: there will be no more 2.x releases. Breaking changes to the public API are allowed if they are intentional, and each one is recorded under `## Breaking Changes` in `Unreleased`, because v3 will need a migration guide. The public API is the methods `initiateConnection`, `readTags`, `writeTags`, `addTags`, `removeTags`, `readAllTags`, `addTranslationTags` and `deleteTranslationTag`, and the events `connected`, `connect-timeout`, `disconnected` and `error`.
 
-## Publicación
+## Publishing
 
-- `package.json` tiene `"files": ["lib"]`, así que solo se publican `lib/`, README, LICENSE y package.json (ni este archivo ni `test/`).
-- No hay `prepublishOnly`: corre `npm run build` antes de `npm publish`, o se publicará un `lib/` viejo.
-- `exports` solo expone la raíz del paquete (`types` + `default`), y `engines` pide Node `^20.19.0 || >=22.12.0`. Los dos cambios ya están anotados en `Unreleased` como breaking.
-- Antes de publicar, prueba el tarball como lo usaría alguien que lo instala: `npm pack`, instálalo en un proyecto temporal y verifica `import`, `require()` y el type-check con TypeScript.
+- `package.json` has `"files": ["lib"]`, so only `lib/`, README, LICENSE and package.json are published (neither this file nor `test/`).
+- There is no `prepublishOnly`: run `npm run build` before `npm publish`, or a stale `lib/` will be published.
+- `exports` only exposes the package root (`types` + `default`), and `engines` requires Node `^20.19.0 || >=22.12.0`. Both changes are already recorded in `Unreleased` as breaking.
+- Before publishing, test the tarball the way a consumer would: `npm pack`, install it in a temporary project, and check `import`, `require()` and type-checking with TypeScript.
