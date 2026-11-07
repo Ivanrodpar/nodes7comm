@@ -44,10 +44,21 @@ const PLC_RETURN_CODES: { [code: number]: string } = {
     0x0a: 'object does not exist',
 };
 
-// Typed events. `extends EventEmitter<Events>` would replace this merge, but consumers on an older @types/node (non-generic EventEmitter) would break.
+// A value read from or written to the PLC: a number, boolean or string, or an array of them for array tags
+// (CHAR arrays are a single string, STRING arrays a string[])
+export type S7Value = number | boolean | string | number[] | boolean[] | string[];
+
+// Typed events. `extends EventEmitter<Events>` would do the same, but needs a generic EventEmitter in the consumer's
+// @types/node, and older versions would fail to compile. Merging these overloads works with any version.
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export declare interface NodeS7Comm {
     on<U extends keyof NodeS7CommEvents>(event: U, listener: NodeS7CommEvents[U]): this;
+    once<U extends keyof NodeS7CommEvents>(event: U, listener: NodeS7CommEvents[U]): this;
+    addListener<U extends keyof NodeS7CommEvents>(event: U, listener: NodeS7CommEvents[U]): this;
+    prependListener<U extends keyof NodeS7CommEvents>(event: U, listener: NodeS7CommEvents[U]): this;
+    prependOnceListener<U extends keyof NodeS7CommEvents>(event: U, listener: NodeS7CommEvents[U]): this;
+    off<U extends keyof NodeS7CommEvents>(event: U, listener: NodeS7CommEvents[U]): this;
+    removeListener<U extends keyof NodeS7CommEvents>(event: U, listener: NodeS7CommEvents[U]): this;
     emit<U extends keyof NodeS7CommEvents>(event: U, ...args: Parameters<NodeS7CommEvents[U]>): boolean;
 }
 
@@ -2363,7 +2374,12 @@ export class NodeS7Comm extends EventEmitter {
         this.outputLog(`Tag ${tags} removed`, 3);
     }
 
-    public async readTags(tags: string | string[]): Promise<any> {
+    /**
+     * Reads one or more tags (S7 addresses or aliases from `addTranslationTags`) and resolves with their values, keyed by tag.
+     * The keys are typed from the arguments; pass the value type when you know it: `readTags<number>('DB1,INT0')`.
+     */
+    public readTags<V extends S7Value = S7Value, T extends string = string>(tags: T | readonly T[]): Promise<Record<T, V>>;
+    public async readTags(tags: string | readonly string[]): Promise<Record<string, S7Value>> {
         if (this.isoConnectionState !== 's7comm') {
             this.outputLog('Unable to read when not connected', 1);
             return Promise.reject(new S7Error('NOT_CONNECTED', 'Unable to read when not connected'));
@@ -2406,12 +2422,13 @@ export class NodeS7Comm extends EventEmitter {
         this.sendReadPacket(preparedReadRequest); // Note this sends the first few read packets depending on parallel connection restrictions.
 
         // We return a `Promise.all` of promises created to be resolved or rejected
-        return Promise.all(promises).then((values): void => {
+        return Promise.all(promises).then(values => {
             return Object.assign({}, ...values);
         });
     }
 
-    public async readAllTags(): Promise<any> {
+    /** Reads every tag stored with `addTags` and resolves with their values, keyed by tag. */
+    public async readAllTags<V extends S7Value = S7Value>(): Promise<Record<string, V>> {
         if (this.isoConnectionState !== 's7comm') {
             this.outputLog('Unable to read when not connected', 1);
             return Promise.reject(new S7Error('NOT_CONNECTED', 'Unable to read when not connected'));
@@ -2454,7 +2471,13 @@ export class NodeS7Comm extends EventEmitter {
         return undefined;
     }
 
-    public async writeTags(tags: string | string[], value: any | any[]): Promise<any> {
+    /**
+     * Writes one tag with its value (an array for array tags), or several tags with one value each.
+     * Resolves with the written values, keyed by tag, once the PLC has acknowledged them.
+     */
+    public writeTags<T extends string>(tags: T, value: S7Value): Promise<Record<T, S7Value>>;
+    public writeTags<T extends string>(tags: readonly T[], values: readonly S7Value[]): Promise<Record<T, S7Value>>;
+    public async writeTags(tags: string | readonly string[], value: S7Value | readonly S7Value[]): Promise<Record<string, S7Value>> {
         if (this.isoConnectionState !== 's7comm') {
             this.outputLog('Unable to write when not connected.', 1);
             return Promise.reject(new S7Error('NOT_CONNECTED', 'Unable to write when not connected'));
@@ -2483,7 +2506,8 @@ export class NodeS7Comm extends EventEmitter {
         }
 
         // With a single tag, `value` is that tag's whole value (an array for array tags)
-        const values: any[] = Array.isArray(tags) ? value : [value];
+        // (when `tags` is an array, `value` was already checked to be an array of the same length)
+        const values: readonly S7Value[] = Array.isArray(tags) ? (value as readonly S7Value[]) : [value as S7Value];
         for (let i = 0; i < addresses.length; i++) {
             const problem = this.checkWriteValue(addresses[i], values[i]);
             if (problem) {

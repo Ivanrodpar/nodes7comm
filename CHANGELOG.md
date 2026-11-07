@@ -1,5 +1,6 @@
 ### Unreleased
 
+- feat: Typed results. `readTags` resolves to `Record<tag, S7Value>` with the keys taken from its arguments, and accepts the value type when you know it: `readTags<number>('DB1,INT0')`. `readAllTags` and `writeTags` are typed too, and `once`, `off`, `addListener`, `removeListener` and the `prepend*` methods know the event names and listener signatures, like `on` already did. `S7Value` and `NodeS7CommEvents` are exported.
 - feat: Added `S7Error`, exported with its `S7ErrorCode` type. Reads and writes now reject with it, and its `code` says what happened: `PLC_ERROR` (with the PLC's return code in `plcCode`), `TIMEOUT`, `INVALID_RESPONSE`, `CONNECTION_LOST`, `DISCONNECTED` or `NOT_CONNECTED`. `tag` names the tag that failed.
 - feat: Added `disconnect()`. It closes the connection and stops reconnecting, rejects pending reads and writes right away with an `S7Error` whose code is `DISCONNECTED`, emits `disconnected`, and resolves once the socket is closed. It's safe to call twice or while connecting, and `initiateConnection()` connects again afterwards.
 - test: Added an automated test suite that runs against a simulated S7 PLC (`npm test`).
@@ -29,6 +30,7 @@
 - TypeScript users need TypeScript 5.0 or newer, or 5.8 or newer when importing from CommonJS files with `"module": "nodenext"`.
 - Reads and writes reject with an `S7Error` instead of a string. Replace checks such as `err === 'Timeout'` with `err.code === 'TIMEOUT'`. An error answered by the PLC (a missing DB, an address out of range...) used to reject with `'Timeout'` too; it is now `PLC_ERROR`, with a message like `The PLC rejected DB206,REAL132: address out of range (code 0x05)`.
 - `readAllTags()` with no stored tags resolves to `{}` instead of `[]`, like every other read.
+- TypeScript: `readTags`, `readAllTags` and `writeTags` no longer return `Promise<any>`. Code that used the values as a specific type needs `readTags<number>(...)` or a check. `writeTags` with several tags requires an array with one value each.
 - `writeTags` rejects values that don't match their tag, without writing anything: array tags need an array with exactly one value per element (CHAR arrays take a string), and single-value tags reject arrays. Before, those values were written as zeros or garbage, and `writeTags('MB0', [5])` wrote `5`.
 
 

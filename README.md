@@ -221,6 +221,18 @@ s7Client.initiateConnection();
 
 ```
 
+## TypeScript
+
+The results are typed with the tags you pass, and `S7Value` covers every value a tag can hold (`number | boolean | string` or an array of them). Pass the type when you know it:
+
+```ts
+const values = await s7Client.readTags(['DB206,INT6', 'DB206,X0.0']);
+// values: Record<'DB206,INT6' | 'DB206,X0.0', S7Value>
+
+const { 'DB206,INT6': mixingTime } = await s7Client.readTags<number>('DB206,INT6');
+// mixingTime: number
+```
+
 ## Errors
 
 Reads and writes reject with an `S7Error`. Check its `code` instead of the message:

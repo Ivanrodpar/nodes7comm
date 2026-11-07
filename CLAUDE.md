@@ -7,7 +7,7 @@ TypeScript library published on npm to communicate with Siemens S7-300/400/1200/
 - `npm run build`: compiles `src/` → `lib/` with `tsc` (`lib/` is in `.gitignore`).
 - `npx tsc --noEmit`: type-check.
 - `npm run lint`: ESLint 10 with flat config (`eslint.config.js`), typescript-eslint, and prettier as a rule. It checks the `.ts` files and the `.js` config files.
-- `npm test`: builds and runs the `test/` suite with `node:test` against a simulated PLC. Takes about 5 s (two connection tests wait for the real 2 s reconnect delay).
+- `npm test`: builds, type-checks the public API with `tsc -p test/types` (`test/types/api.ts`, checked against `lib/*.d.ts`, never run), and runs the `test/` suite with `node:test` against a simulated PLC. Takes about 5 s (two connection tests wait for the real 2 s reconnect delay).
 - A single file or test: `npx tsc && node --test --test-name-pattern="<name>" test/<file>.test.ts`.
 - Development needs Node ≥22.18, which runs TypeScript without compiling; the tests rely on it. People installing the package only need what `engines` says.
 - There is no script to test against a real PLC. Hardware testing happens in the author's own projects that use this library.
@@ -55,8 +55,7 @@ The ten bugs found on 2026-10-31 are fixed (see `Unreleased` in the CHANGELOG). 
 
 ## Planned for 3.0.0 (API changes)
 
-These change public behaviour, so each one must be recorded under `## Breaking Changes` (or as a `feat:`) in `Unreleased` when it's done. Done so far: unhandled `error` events (see `emitError` under Protocol caveats), `disconnect()`, `S7Error` rejections (see Protocol caveats), and reads with no tags resolving to `{}` (`readAllTags()` used to return `[]`).
-- **Typed results** instead of `Promise<any>`, and `EventEmitter<Events>` instead of the interface + class merge.
+These change public behaviour, so each one must be recorded under `## Breaking Changes` (or as a `feat:`) in `Unreleased` when it's done. Done so far: unhandled `error` events (see `emitError` under Protocol caveats), `disconnect()`, `S7Error` rejections (see Protocol caveats), reads with no tags resolving to `{}` (`readAllTags()` used to return `[]`), and typed results (`S7Value`, `Record<tag, S7Value>`).
 - **Configurable reconnect delay** (today the private `reconnectDelay`, 2 s).
 - The connection-timeout path (`initTCPConnect`'s `setTimeout`) emits `connect-timeout` but never settles the promise `connectNow` awaits, so each timed-out attempt leaves a pending promise behind. (`disconnect()` no longer has this problem: it uses `abortConnecting`; the timeout handler could do the same, but rejecting there would also emit `error`, which is a behaviour change.)
 
@@ -74,7 +73,8 @@ These change public behaviour, so each one must be recorded under `## Breaking C
 - `EventEmitter` is imported from `'events'`. In ESM, `import { EventEmitter } from 'stream'` fails: it only worked in CommonJS, through inheritance.
 - `.prettierrc.js` is ESM (`export default`) because the package is `"type": "module"`.
 - `src/nodes7comm.ts` and `src/types/request.types.ts` have `/// <reference types="node" preserve="true" />`. Don't remove it: without it, the published `.d.ts` files lose their reference to `@types/node` (TS ≥5.5 no longer emits it).
-- The interface + class merge of `NodeS7Comm` (typed events) has an `eslint-disable` on purpose; replacing it with `EventEmitter<Events>` changes the public types.
+- The interface + class merge of `NodeS7Comm` (typed events) has an `eslint-disable` on purpose. It types `on`, `once`, `off`, `emit`, `addListener`, `removeListener` and `prepend*`. `EventEmitter<Events>` was considered and rejected on 2026-11-07: it needs a generic `EventEmitter` in the consumer's `@types/node`, and the merge gives the same typing with any version.
+- Public signatures: `readTags<V extends S7Value = S7Value, T extends string = string>(tags: T | readonly T[]): Promise<Record<T, V>>` (V first, so `readTags<number>(...)` works; T is then `string`, because TypeScript has no partial inference), and `writeTags` has two overloads: one tag with one value, or a tag array with a value array. Any change to them must keep `test/types/api.ts` passing; its `@ts-expect-error` lines catch types that degrade to `any`. Verified on 2026-11-07 with consumers on TS 5.0, 5.4 and 6.0.
 - `npm audit` only reports warnings in `minimatch`, pulled in by ESLint and typescript-eslint, with no published fix yet. These are development tools and are not published.
 
 ## Conventions
