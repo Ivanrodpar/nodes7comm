@@ -354,3 +354,22 @@ export async function getClosedPort(): Promise<number> {
     await new Promise<void>(resolve => server.close(() => resolve()));
     return port;
 }
+
+// Wraps the private connectNow() of one client to get the promise of each connection attempt
+export function captureConnectAttempt(client: NodeS7Comm): { attempt: () => Promise<void> | undefined } {
+    const internals = client as unknown as { connectNow: () => Promise<void> };
+    const original = internals.connectNow.bind(client);
+    let attempt: Promise<void> | undefined;
+    internals.connectNow = () => (attempt = original());
+    return { attempt: () => attempt };
+}
+
+// True if the promise settles (resolves or rejects) within `ms`
+export async function settlesWithin(promise: Promise<void> | undefined, ms: number): Promise<boolean> {
+    const timeout = new Promise<boolean>(resolve => setTimeout(() => resolve(false), ms));
+    const settled = promise?.then(
+        () => true,
+        () => true,
+    );
+    return Promise.race([settled ?? Promise.resolve(false), timeout]);
+}

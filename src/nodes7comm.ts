@@ -34,6 +34,9 @@ export class S7Error extends Error {
     }
 }
 
+// Rejects a connection step that timed out: connectNow ends quietly, because 'connect-timeout' was already emitted
+const CONNECT_TIMED_OUT: unique symbol = Symbol('connect timed out');
+
 // Item return codes of the S7 protocol (0xff means success)
 const PLC_RETURN_CODES: { [code: number]: string } = {
     0x01: 'hardware fault',
@@ -1668,6 +1671,8 @@ export class NodeS7Comm extends EventEmitter {
             const timeHandler = (): void => {
                 this.packetTimeout('PDU');
                 this.emit('connect-timeout');
+                this.closeTimedOutConnection();
+                reject(CONNECT_TIMED_OUT);
             };
             this.PDUTimeout = setTimeout(timeHandler, this.connectionTimeout);
 
@@ -1743,6 +1748,8 @@ export class NodeS7Comm extends EventEmitter {
             const timeHandler = (): void => {
                 this.packetTimeout('ISO');
                 this.emit('connect-timeout');
+                this.closeTimedOutConnection();
+                reject(CONNECT_TIMED_OUT);
             };
             this.connectTimeout = setTimeout(timeHandler, this.requestTimeout);
             // Listen for a reply.
@@ -1787,6 +1794,7 @@ export class NodeS7Comm extends EventEmitter {
             this.client.setTimeout(this.connectionTimeout || 5000, (): void => {
                 this.connectError(new Error('Connection timeout'));
                 this.emit('connect-timeout');
+                reject(CONNECT_TIMED_OUT);
             });
 
             this.client.once('connect', (): void => {
@@ -1833,9 +1841,18 @@ export class NodeS7Comm extends EventEmitter {
             this.initS7commListeners();
             this.emit('connected');
         } catch (err) {
-            if (!this.disconnectRequested) {
+            // A timed-out step already emitted 'connect-timeout'; disconnect() needs no event at all
+            if (err !== CONNECT_TIMED_OUT && !this.disconnectRequested) {
                 this.emitError(err as Error);
             }
+        }
+    }
+
+    private closeTimedOutConnection(): void {
+        // With autoReconnect, the scheduled reconnection closes the socket; without it, close it now so it doesn't
+        // keep one of the PLC's few connections busy
+        if (!this.autoReconnect) {
+            this.connectionReset();
         }
     }
 

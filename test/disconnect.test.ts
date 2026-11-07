@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { FakePlc, connectClient, createClient, disposeClients, getClosedPort, isS7Error } from './helpers/fake-plc.ts';
+import { FakePlc, captureConnectAttempt, connectClient, createClient, disposeClients, getClosedPort, isS7Error, settlesWithin } from './helpers/fake-plc.ts';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -105,20 +105,6 @@ describe('disconnect()', () => {
         await sleep(150); // The ISO timeout (100 ms) would have fired by now
         assert.deepEqual(events, []);
     });
-
-    // Wraps the private connectNow() of one client to get the promise of the connection attempt
-    const captureConnectAttempt = (client: object): { attempt: () => Promise<void> | undefined } => {
-        const internals = client as { connectNow: () => Promise<void> };
-        const original = internals.connectNow.bind(client);
-        let attempt: Promise<void> | undefined;
-        internals.connectNow = () => (attempt = original());
-        return { attempt: () => attempt };
-    };
-
-    const settlesWithin = async (promise: Promise<void> | undefined, ms: number): Promise<boolean> => {
-        const timeout = new Promise<boolean>(resolve => setTimeout(() => resolve(false), ms));
-        return Promise.race([promise?.then(() => true) ?? Promise.resolve(false), timeout]);
-    };
 
     for (const step of ['TCP', 'ISO', 'PDU']) {
         it(`ends a connection attempt stuck in the ${step} step instead of leaving it pending`, async () => {

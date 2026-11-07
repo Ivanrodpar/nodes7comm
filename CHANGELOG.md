@@ -20,6 +20,7 @@
 - fix: Writing a DWORD array with a value of 2^31 or more rejected with a `RangeError`, because arrays were written as signed integers. They are now unsigned, like single DWORD values.
 - fix: A connection error with no `error` listener ended the process (Node throws on an unhandled `error` event, and here it surfaced as an unhandled rejection). The error is now written to stderr instead, even with `logLevel: 'none'`, and `autoReconnect` keeps trying. With a listener, `error` is emitted as before.
 - fix: When the socket couldn't send right away (a slow or congested link), several requests prepared together could reach the PLC corrupted, because they were written from a shared buffer that the next request overwrote. Each request is now sent from its own copy.
+- fix: A connection attempt that timed out (TCP, ISO or PDU step) emitted `connect-timeout` but never finished, leaving a pending promise behind on every retry. It now ends quietly after emitting `connect-timeout`. With `autoReconnect: false`, a timed-out ISO or PDU step also left its socket open, holding one of the PLC's connections; it is now closed.
 - fix: `readTags([])` (an empty list) rejected with an internal `TypeError`. It now resolves to `{}`, as `writeTags([], [])` already did.
 - docs: The license now includes the copyright notice of nodeS7, which this library is ported from, as its MIT license requires.
 

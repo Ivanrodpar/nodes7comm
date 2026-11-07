@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { FakePlc, connectClient, createClient, disposeClients, getClosedPort, isS7Error } from './helpers/fake-plc.ts';
+import { FakePlc, captureConnectAttempt, connectClient, createClient, disposeClients, getClosedPort, isS7Error, settlesWithin } from './helpers/fake-plc.ts';
 
 describe('connection', () => {
     let plc: FakePlc;
@@ -139,6 +139,48 @@ describe('connection', () => {
         const timeout = once(client, 'connect-timeout');
         client.initiateConnection();
         await timeout;
+    });
+
+    describe('a connection step that times out', () => {
+        const stall = {
+            // A host that never answers, so the TCP connect stays in progress (the connection timeout is 200 ms)
+            TCP: (): { host: string; port: number } => ({ host: '10.255.255.1', port: 102 }),
+            ISO: (): { host: string; port: number } => {
+                plc.ignoreConnectionRequests = true; // Times out after requestTimeout (100 ms)
+                return { host: '127.0.0.1', port: plc.port };
+            },
+            PDU: (): { host: string; port: number } => {
+                // The PLC confirms ISO but never answers the PDU negotiation (times out after connectionTimeout, 200 ms)
+                (plc as unknown as { onSetupCommunication: () => void }).onSetupCommunication = () => undefined;
+                return { host: '127.0.0.1', port: plc.port };
+            },
+        };
+
+        for (const step of ['TCP', 'ISO', 'PDU'] as const) {
+            it(`${step}: ends the attempt instead of leaving it pending, and emits only connect-timeout`, async () => {
+                const client = createClient({ ...stall[step](), connectionTimeout: 200, requestTimeout: 100 });
+                const events: string[] = [];
+                client.on('connect-timeout', () => events.push('connect-timeout'));
+                client.on('error', () => events.push('error'));
+                const capture = captureConnectAttempt(client);
+                client.initiateConnection();
+                assert.equal(await settlesWithin(capture.attempt(), 1500), true);
+                if (step === 'TCP' && events.includes('error')) {
+                    return; // Some networks refuse 10.255.255.1 right away instead of letting it time out
+                }
+                assert.deepEqual(events, ['connect-timeout']);
+            });
+        }
+
+        it('closes the socket when autoReconnect is off', async () => {
+            plc.ignoreConnectionRequests = true;
+            const client = createClient({ port: plc.port, requestTimeout: 100 });
+            const timeout = once(client, 'connect-timeout');
+            client.initiateConnection();
+            await timeout;
+            await new Promise(resolve => setTimeout(resolve, 50));
+            assert.equal(plc.connectionCount, 0); // It used to stay open, holding one of the PLC's connections
+        });
     });
 
     it('rejects a read with a TIMEOUT S7Error and emits disconnected when the PLC stops answering', async () => {
