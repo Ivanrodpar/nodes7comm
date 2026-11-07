@@ -51,6 +51,33 @@ describe('connection', () => {
         assert.match(err.message, /ECONNREFUSED/);
     });
 
+    it('emits error and not connected when the PDU negotiation reply is invalid', async () => {
+        plc.invalidPduReply = true;
+        const client = createClient({ port: plc.port });
+        let connected = false;
+        client.on('connected', () => {
+            connected = true;
+        });
+        const error = once(client, 'error');
+        client.initiateConnection();
+        const [err] = await error;
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /Invalid response on PDU reply/);
+        await new Promise(resolve => setTimeout(resolve, 50)); // 'connected' used to follow right after
+        assert.equal(connected, false);
+        await assert.rejects(client.readTags('MB0'), /Unable to read when not connected/);
+    });
+
+    it('connects when the PLC sends a fast acknowledgement before the PDU reply', async () => {
+        plc.fastAcknowledge = true;
+        plc.pduSize = 480;
+        const client = await connectClient(plc);
+        const text = 'v'.repeat(240); // 256 bytes: a single part with PDU 480, two with PDU 240
+        plc.db(1).set([254, text.length, ...Buffer.from(text)], 0);
+        assert.deepEqual(await client.readTags('DB1,S0.254'), { 'DB1,S0.254': text });
+        assert.equal(plc.jobs.length, 1); // Proves the PDU was really negotiated, not left at a default
+    });
+
     it('emits connect-timeout when the PLC never confirms the ISO connection', async () => {
         plc.ignoreConnectionRequests = true;
         const client = createClient({ port: plc.port, requestTimeout: 100 }); // The ISO step uses requestTimeout, not connectionTimeout

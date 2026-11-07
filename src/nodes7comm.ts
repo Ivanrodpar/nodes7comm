@@ -1536,26 +1536,10 @@ export class NodeS7Comm extends EventEmitter {
         });
     }
 
-    private async onPDUReply(theData: Buffer): Promise<void> {
+    private onPDUReply(theData: Buffer): void {
+        // Throws on an invalid reply, so connectNow emits 'error' instead of 'connected'
         const data = this.checkRfcData(theData);
-        if (data === 'fastACK') {
-            //Read again and wait for the requested data
-            this.outputLog('Fast Acknowledge received', 3);
-
-            this.client.removeAllListeners('error');
-            this.client.removeAllListeners('data');
-
-            this.client.once('data', (data: Buffer): void => {
-                this.client.removeAllListeners('error');
-                this.onPDUReply(data);
-            });
-
-            this.client.on('error', (err: Error): void => {
-                const error = new Error('Error on PDU reply. ' + err);
-                this.readWriteError(error);
-                throw error;
-            });
-        } else if (data instanceof Buffer && data[4] + 1 + 12 + data.readInt16BE(13) === data.readInt16BE(2) - 4) {
+        if (data instanceof Buffer && data[4] + 1 + 12 + data.readInt16BE(13) === data.readInt16BE(2) - 4) {
             // Valid the length of FA+S7 package :  ISO_Length+ISO_LengthItself+S7Com_Header+S7Com_Header_ParameterLength===TPKT_Length-4
             // Everything OK...go on
 
@@ -1596,7 +1580,7 @@ export class NodeS7Comm extends EventEmitter {
             } else {
                 this.connectionReset();
             }
-            return Promise.reject('Invalid response on PDU reply');
+            throw new Error('Invalid response on PDU reply');
         }
     }
 
@@ -1608,11 +1592,18 @@ export class NodeS7Comm extends EventEmitter {
             };
             this.PDUTimeout = setTimeout(timeHandler, this.connectionTimeout);
 
-            this.client.once('data', (data: Buffer): void => {
+            const onData = (data: Buffer): void => {
+                if (this.checkRfcData(data) === 'fastACK') {
+                    // Older PLCs and WinAC acknowledge first; keep waiting for the real reply
+                    this.outputLog('Fast Acknowledge received', 3);
+                    return;
+                }
                 clearTimeout(this.PDUTimeout as NodeJS.Timeout);
+                this.client.removeListener('data', onData);
                 this.client.removeAllListeners('error');
                 resolve(data);
-            });
+            };
+            this.client.on('data', onData);
 
             this.client.removeAllListeners('error');
             this.client.on('error', (err: Error): void => {

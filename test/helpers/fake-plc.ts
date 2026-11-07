@@ -159,7 +159,17 @@ export class FakePlc {
         if (this.invalidPduReply) {
             reply.writeUInt16BE(9, 13); // Parameter length no longer matches the packet length
         }
-        socket.write(reply);
+        if (!this.fastAcknowledge) {
+            socket.write(reply);
+            return;
+        }
+        // Acknowledge first and reply a bit later, so the client receives them as separate data events
+        socket.write(FAST_ACKNOWLEDGE);
+        this.schedule(() => {
+            if (!socket.destroyed) {
+                socket.write(reply);
+            }
+        }, 5);
     }
 
     private onJob(socket: Socket, type: 'read' | 'write', packet: Buffer, seqNum: number): void {

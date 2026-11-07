@@ -4,7 +4,6 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { AREA, FakePlc, connectClient, createClient, disposeClients, getClosedPort } from './helpers/fake-plc.ts';
 
@@ -29,19 +28,6 @@ describe('known bugs', () => {
         client.addTags(tags);
         assert.deepEqual(tags, ['M0.1', 'M0.5']);
         assert.deepEqual(Object.keys(await client.readAllTags()).sort(), ['M0.0', 'M0.1', 'M0.5']);
-    });
-
-    it('emits error and not connected when the PDU negotiation reply is invalid', knownBug('emits connected, then an unhandled rejection crashes the process'), async () => {
-        plc.invalidPduReply = true;
-        const client = createClient({ port: plc.port });
-        let connected = false;
-        client.on('connected', () => {
-            connected = true;
-        });
-        const error = once(client, 'error');
-        client.initiateConnection();
-        await error;
-        assert.equal(connected, false);
     });
 
     it('waits before reconnecting when the connection is refused', knownBug('reconnects immediately, thousands of times per second'), async () => {

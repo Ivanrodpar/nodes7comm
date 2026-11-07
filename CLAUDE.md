@@ -45,7 +45,6 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 Each bug has a test in `test/known-bugs.test.ts` that describes the correct behaviour and is skipped. To fix one: run its test with `RUN_KNOWN_BUGS=1` and `--test-name-pattern` (one at a time, because several crash the process), fix the code, remove the `knownBug(...)` from the test and delete the entry from this list.
 
 - `addTags([...])` with tags that are already stored calls `splice(index, 1)` with the index of the wrong array: it mutates the caller's array, duplicates tags and skips others.
-- `connectNow` doesn't `await` `onPDUReply`. An invalid PDU produces an unhandled rejection (which crashes the process), and `connected` is emitted anyway.
 - With `autoReconnect`, an `ECONNREFUSED` reconnects without any delay and produces thousands of `error` events per second.
 - `DB12,D40`, the form the README documents for DWord, rejects with `Unknown data type: D`. The README also shows DInt examples (`ID140`, `MD100`, `DB2,D100`) that are actually DWord or don't work; the correct forms are `IDI`/`MDI`/`DB2,DI100`.
 - `DB1,STRING0.10` (with `STRING` instead of `S`) computes a length of 0 bytes, sends nothing, and the promise never settles.
