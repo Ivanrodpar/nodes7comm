@@ -53,6 +53,26 @@ describe('tags', () => {
             assert.equal(plc.jobs[0].items.length, 1);
         });
 
+        it('keeps the new tags of an array that also contains stored ones, without modifying it', async () => {
+            client.addTags(['M0.0', 'M0.1']);
+            const tags = ['M0.1', 'M0.5'];
+            client.addTags(tags);
+            assert.deepEqual(tags, ['M0.1', 'M0.5']);
+            assert.deepEqual(Object.keys(await client.readAllTags()).sort(), ['M0.0', 'M0.1', 'M0.5']);
+        });
+
+        it('stores a tag repeated in the same call only once', async () => {
+            const unoptimized = await connectClient(plc, { optimize: false });
+            unoptimized.addTags(['MB1', 'MB2', 'MB1']);
+            assert.deepEqual(await unoptimized.readAllTags(), { MB1: 0, MB2: 0 });
+            assert.equal(plc.jobs[0].items.length, 2);
+        });
+
+        it('stores nothing when one of the tags is invalid', async () => {
+            assert.throws(() => client.addTags(['MB0', 'XYZ0']), /Failed to find a match for: XYZ0/);
+            assert.deepEqual(await client.readAllTags(), []);
+        });
+
         it('stops reading a tag after removeTags', async () => {
             client.addTags(['MB0', 'MB1']);
             client.removeTags('MB0');

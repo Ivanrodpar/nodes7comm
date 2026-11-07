@@ -20,15 +20,6 @@ describe('known bugs', () => {
         await plc.stop();
     });
 
-    it('addTags with an array keeps the tags that are not stored yet', knownBug('splices the wrong index'), async () => {
-        const client = await connectClient(plc);
-        client.addTags(['M0.0', 'M0.1']);
-        const tags = ['M0.1', 'M0.5'];
-        client.addTags(tags);
-        assert.deepEqual(tags, ['M0.1', 'M0.5']);
-        assert.deepEqual(Object.keys(await client.readAllTags()).sort(), ['M0.0', 'M0.1', 'M0.5']);
-    });
-
     it('accepts DB DWord addresses written as in the README (DB12,D40)', knownBug('rejects with "Unknown data type: D"'), async () => {
         const client = await connectClient(plc);
         plc.db(12).writeUInt32BE(0x12345678, 40);

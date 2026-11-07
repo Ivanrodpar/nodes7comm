@@ -9,6 +9,7 @@
 - fix: An invalid reply to the PDU negotiation crashed the process with an unhandled rejection, and `connected` was emitted anyway. It now emits `error` with an `Error` and doesn't emit `connected`.
 - fix: When the PLC sent a fast acknowledgement before the PDU negotiation reply, `connected` was emitted before the negotiation finished and the first requests failed. The acknowledgement is now ignored and the client waits for the real reply.
 - fix: With `autoReconnect`, a failed connection attempt (for example a refused connection) was retried immediately, in a tight loop that emitted thousands of `error` events per second. Failed attempts are now retried after 2 seconds.
+- fix: `addTags()` with an array that included already stored tags removed the wrong elements from the caller's array, stored some tags twice and skipped others. It no longer modifies the array, ignores tags already stored or repeated in the same call, and stores nothing if one of the tags is invalid.
 - docs: The license now includes the copyright notice of nodeS7, which this library is ported from, as its MIT license requires.
 
 ## Breaking Changes

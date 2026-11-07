@@ -45,14 +45,23 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 
 Each bug has a test in `test/known-bugs.test.ts` that describes the correct behaviour and is skipped. To fix one: run its test with `RUN_KNOWN_BUGS=1` and `--test-name-pattern` (one at a time, because several crash the process), fix the code, remove the `knownBug(...)` from the test and delete the entry from this list.
 
-- `addTags([...])` with tags that are already stored calls `splice(index, 1)` with the index of the wrong array: it mutates the caller's array, duplicates tags and skips others.
 - `DB12,D40`, the form the README documents for DWord, rejects with `Unknown data type: D`. The README also shows DInt examples (`ID140`, `MD100`, `DB2,D100`) that are actually DWord or don't work; the correct forms are `IDI`/`MDI`/`DB2,DI100`.
 - `DB1,STRING0.10` (with `STRING` instead of `S`) computes a length of 0 bytes, sends nothing, and the promise never settles.
 - `writeTags('DB1,INT0.3', [-1, 0, 1])` (a single tag as a string with an array value) writes zeros. Only `writeTags(['DB1,INT0.3'], [[-1, 0, 1]])` works.
 - `bufferizeValue` uses `writeInt32BE` for DWORD arrays, so values ≥ 2^31 reject with a `RangeError`.
 - Unverified: in `S7AddrToBuffer`, the timer/counter branch compares `address.Type === 'TIMER'`, but `Type` is `'T'`/`'C'`, so that branch never runs.
-- There is no public method to disconnect.
-- Promises reject with strings (`'Timeout'`), not with `Error`.
+
+## Planned for 3.0.0 (API changes, not started)
+
+These change public behaviour, so each one must be recorded under `## Breaking Changes` (or as a `feat:`) in `Unreleased` when it's done.
+
+- **Unhandled `error` events.** Today, a connection error emitted with no `error` listener throws inside the async `connectNow` and ends the process as an unhandled rejection (verified on 2026-11-06). Plan, like ioredis: emit `error` only if `this.listenerCount('error') > 0`; otherwise write it with `console.error` (even with `logLevel: 'none'`) and keep reconnecting. Connection errors are recoverable here, and request errors already reject their own promise.
+- **`disconnect()`.** There is no public way to close the connection. `test/helpers/fake-plc.ts` (`disposeClients`) works around it through private state; switch it to `disconnect()` when it exists.
+- **Reject with `Error` objects** instead of strings (`'Timeout'`, `'Invalid response'`). Several tests pin the current strings.
+- **`readAllTags()`** with no stored tags resolves to `[]`; it should resolve to `{}` like every other read.
+- **Typed results** instead of `Promise<any>`, and `EventEmitter<Events>` instead of the interface + class merge.
+- **Configurable reconnect delay** (today the private `reconnectDelay`, 2 s).
+- The connection-timeout path (`initTCPConnect`'s `setTimeout`) emits `connect-timeout` but never settles the promise `connectNow` awaits, so each timed-out attempt leaves a pending promise behind.
 
 ## Tooling (updated on 2026-10-31)
 
