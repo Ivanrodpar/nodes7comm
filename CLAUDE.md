@@ -44,7 +44,7 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 - Create clients with `connectClient`/`createClient` (`autoReconnect: false` by default) and `await disposeClients()` in `afterEach`; it calls `disconnect()` on every client. If a test expects a promise to reject during `disconnect()`, attach `assert.rejects(...)` before disconnecting, or Node reports an unhandled rejection.
 - Await every client promise: an unhandled rejection crashes the test process.
 - Check rejections with `assert.rejects(promise, isS7Error('PLC_ERROR', { plcCode: 0x05, tag: 'DB1,INT0', message: /.../ }))` (from `fake-plc.ts`); every property besides the code is optional.
-- The existing tests pin the **current** behaviour, including the odd parts (for example, that `readAllTags()` with no tags resolves to `[]`). If a change breaks one of them, it is an API change: that's allowed because the next release is 3.0.0, but it must be intentional. Update the test and record it under `## Breaking Changes` in `Unreleased`.
+- The existing tests pin the **current** behaviour, including the odd parts. If a change breaks one of them, it is an API change: that's allowed because the next release is 3.0.0, but it must be intentional. Update the test and record it under `## Breaking Changes` in `Unreleased`.
 
 ## Known issues (updated on 2026-11-06)
 
@@ -55,8 +55,7 @@ The ten bugs found on 2026-10-31 are fixed (see `Unreleased` in the CHANGELOG). 
 
 ## Planned for 3.0.0 (API changes)
 
-These change public behaviour, so each one must be recorded under `## Breaking Changes` (or as a `feat:`) in `Unreleased` when it's done. Done so far: unhandled `error` events (see `emitError` under Protocol caveats), `disconnect()`, and `S7Error` rejections (see Protocol caveats).
-- **`readAllTags()`** with no stored tags resolves to `[]`; it should resolve to `{}` like every other read.
+These change public behaviour, so each one must be recorded under `## Breaking Changes` (or as a `feat:`) in `Unreleased` when it's done. Done so far: unhandled `error` events (see `emitError` under Protocol caveats), `disconnect()`, `S7Error` rejections (see Protocol caveats), and reads with no tags resolving to `{}` (`readAllTags()` used to return `[]`).
 - **Typed results** instead of `Promise<any>`, and `EventEmitter<Events>` instead of the interface + class merge.
 - **Configurable reconnect delay** (today the private `reconnectDelay`, 2 s).
 - The connection-timeout path (`initTCPConnect`'s `setTimeout`) emits `connect-timeout` but never settles the promise `connectNow` awaits, so each timed-out attempt leaves a pending promise behind. (`disconnect()` no longer has this problem: it uses `abortConnecting`; the timeout handler could do the same, but rejecting there would also emit `error`, which is a behaviour change.)

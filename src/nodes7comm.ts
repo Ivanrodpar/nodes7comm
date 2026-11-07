@@ -2387,6 +2387,11 @@ export class NodeS7Comm extends EventEmitter {
             return Promise.reject(new Error('Invalid values provided'));
         }
 
+        // readTags([]): nothing to send (prepareReadPacket needs at least one address)
+        if (addresses.length === 0) {
+            return {};
+        }
+
         // Create the promises for each Tags and we stored in the same address object
         const promises: Promise<any>[] = [];
         addresses.forEach((address): void => {
@@ -2411,9 +2416,9 @@ export class NodeS7Comm extends EventEmitter {
             this.outputLog('Unable to read when not connected', 1);
             return Promise.reject(new S7Error('NOT_CONNECTED', 'Unable to read when not connected'));
         }
-        // If we no have adresses stored, we immediately return an empty array
+        // Nothing stored: resolve right away with an empty object, like any other read with no tags
         if (this.storedAdresses.length === 0) {
-            return Promise.resolve([]);
+            return Promise.resolve({});
         }
         const addresses: Address[] = [...this.storedAdresses]; // We need a copy, not a reference
 

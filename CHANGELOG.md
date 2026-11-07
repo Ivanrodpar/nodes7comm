@@ -18,6 +18,7 @@
 - fix: `DB1,STRING0.10` (`STRING` instead of `S`) was read as an empty item, so no request was sent and the promise never settled. `STRING` now works like `S`, and any address that would read 0 bytes (for example `DB1,S0` without a length) rejects with `Invalid length`.
 - fix: Writing a DWORD array with a value of 2^31 or more rejected with a `RangeError`, because arrays were written as signed integers. They are now unsigned, like single DWORD values.
 - fix: A connection error with no `error` listener ended the process (Node throws on an unhandled `error` event, and here it surfaced as an unhandled rejection). The error is now written to stderr instead, even with `logLevel: 'none'`, and `autoReconnect` keeps trying. With a listener, `error` is emitted as before.
+- fix: `readTags([])` (an empty list) rejected with an internal `TypeError`. It now resolves to `{}`, as `writeTags([], [])` already did.
 - docs: The license now includes the copyright notice of nodeS7, which this library is ported from, as its MIT license requires.
 
 ## Breaking Changes
@@ -27,6 +28,7 @@
 - Added an `exports` map: only the package root can be imported. Deep imports such as `nodes7comm/lib/...` no longer work.
 - TypeScript users need TypeScript 5.0 or newer, or 5.8 or newer when importing from CommonJS files with `"module": "nodenext"`.
 - Reads and writes reject with an `S7Error` instead of a string. Replace checks such as `err === 'Timeout'` with `err.code === 'TIMEOUT'`. An error answered by the PLC (a missing DB, an address out of range...) used to reject with `'Timeout'` too; it is now `PLC_ERROR`, with a message like `The PLC rejected DB206,REAL132: address out of range (code 0x05)`.
+- `readAllTags()` with no stored tags resolves to `{}` instead of `[]`, like every other read.
 - `writeTags` rejects values that don't match their tag, without writing anything: array tags need an array with exactly one value per element (CHAR arrays take a string), and single-value tags reject arrays. Before, those values were written as zeros or garbage, and `writeTags('MB0', [5])` wrote `5`.
 
 

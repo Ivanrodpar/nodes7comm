@@ -70,7 +70,7 @@ describe('tags', () => {
 
         it('stores nothing when one of the tags is invalid', async () => {
             assert.throws(() => client.addTags(['MB0', 'XYZ0']), /Failed to find a match for: XYZ0/);
-            assert.deepEqual(await client.readAllTags(), []);
+            assert.deepEqual(await client.readAllTags(), {});
         });
 
         it('stops reading a tag after removeTags', async () => {
@@ -79,9 +79,21 @@ describe('tags', () => {
             assert.deepEqual(await client.readAllTags(), { MB1: 0 });
         });
 
-        it('resolves readAllTags with an empty array when no tags are stored', async () => {
-            // Inconsistent with the object returned otherwise, but it is the current public behaviour
-            assert.deepEqual(await client.readAllTags(), []);
+        it('resolves readAllTags with an empty object when no tags are stored', async () => {
+            assert.deepEqual(await client.readAllTags(), {});
+            assert.equal(plc.jobs.length, 0);
+        });
+
+        it('resolves readAllTags with an empty object after removing every tag', async () => {
+            client.addTags(['MB0', 'MB1']);
+            client.removeTags(['MB0', 'MB1']);
+            assert.deepEqual(await client.readAllTags(), {});
+        });
+
+        it('resolves readTags and writeTags with an empty object for an empty list', async () => {
+            assert.deepEqual(await client.readTags([]), {});
+            assert.deepEqual(await client.writeTags([], []), {});
+            assert.equal(plc.jobs.length, 0);
         });
     });
 });
