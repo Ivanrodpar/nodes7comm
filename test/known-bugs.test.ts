@@ -1,11 +1,10 @@
 // Each test describes the expected behaviour of a known bug (see "Known issues" in CLAUDE.md) and is skipped
 // until the bug is fixed. Several of them crash the test process instead of failing, so run them one at a time:
-//   RUN_KNOWN_BUGS=1 node --test --test-name-pattern="PDU negotiation" test/known-bugs.test.ts
+//   RUN_KNOWN_BUGS=1 node --test --test-name-pattern="DB12,D40" test/known-bugs.test.ts
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { setTimeout as sleep } from 'node:timers/promises';
-import { AREA, FakePlc, connectClient, createClient, disposeClients, getClosedPort } from './helpers/fake-plc.ts';
+import { AREA, FakePlc, connectClient, disposeClients } from './helpers/fake-plc.ts';
 
 const knownBug = (reason: string): { skip: string | false } => ({ skip: process.env.RUN_KNOWN_BUGS ? false : `known bug: ${reason}` });
 
@@ -28,17 +27,6 @@ describe('known bugs', () => {
         client.addTags(tags);
         assert.deepEqual(tags, ['M0.1', 'M0.5']);
         assert.deepEqual(Object.keys(await client.readAllTags()).sort(), ['M0.0', 'M0.1', 'M0.5']);
-    });
-
-    it('waits before reconnecting when the connection is refused', knownBug('reconnects immediately, thousands of times per second'), async () => {
-        const client = createClient({ port: await getClosedPort(), autoReconnect: true });
-        let errors = 0;
-        client.on('error', () => {
-            errors += 1;
-        });
-        client.initiateConnection();
-        await sleep(500);
-        assert.ok(errors < 10, `${errors} error events in 500 ms`);
     });
 
     it('accepts DB DWord addresses written as in the README (DB12,D40)', knownBug('rejects with "Unknown data type: D"'), async () => {

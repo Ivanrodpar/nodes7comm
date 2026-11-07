@@ -7,7 +7,7 @@ TypeScript library published on npm to communicate with Siemens S7-300/400/1200/
 - `npm run build`: compiles `src/` → `lib/` with `tsc` (`lib/` is in `.gitignore`).
 - `npx tsc --noEmit`: type-check.
 - `npm run lint`: ESLint 10 with flat config (`eslint.config.js`), typescript-eslint, and prettier as a rule. It checks the `.ts` files and the `.js` config files.
-- `npm test`: builds and runs the `test/` suite with `node:test` against a simulated PLC. Takes less than 1 s.
+- `npm test`: builds and runs the `test/` suite with `node:test` against a simulated PLC. Takes about 3 s (one test waits for the real 2 s reconnect delay).
 - A single file or test: `npx tsc && node --test --test-name-pattern="<name>" test/<file>.test.ts`.
 - Development needs Node ≥22.18, which runs TypeScript without compiling; the tests rely on it. People installing the package only need what `engines` says.
 - There is no script to test against a real PLC. Hardware testing happens in the author's own projects that use this library.
@@ -26,6 +26,7 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 
 - The offsets and magic numbers (`dataPointer = 21`, the `readReqHeader`/`writeReqHeader`/`connectReq`/`negotiatePDU` headers, the fill bytes for odd lengths, `maxByteRequest = 4 * floor((maxPDU - 18) / 4)`) come from nodeS7 and the protocol. Don't "clean them up" without a test that covers the case.
 - Sequence numbers wrap after 32767.
+- Reconnection: a failed connection attempt (`connectError`, ISO/PDU timeouts, invalid PDU reply) always goes through `scheduleReconnect`, which waits `reconnectDelay` (2 s). `connectionReset` reconnects immediately and is only meant for a connection that was already established. Calling it from a failed attempt brings back the tight reconnect loop.
 - TCP is a stream: once connected, `onData` accumulates the bytes in `receiveBuffer` and passes `onResponse` exactly one complete TPKT packet at a time (length in bytes 2-3). The handshake replies (`initISOConnect`, `initPDUConnect`) still read a single `data` event; they are small and haven't caused problems, but they are not framed.
 - A tag larger than `maxByteRequest` is split into several parts that share a `readRequestSequence`/`writeRequestSequence`, and one packet can mix parts of different tags. `readResponse` and `writeResponse` therefore handle each block of a packet separately, and keep answered packets until every part of their sequence has been answered (`isReadSequenceReceived` / `isWriteSequenceReceived`). Never assume `requestList[0]` describes the whole packet.
 - An S7-1200/300 usually negotiates a PDU of 240 (~220 usable bytes per item) and an S7-1500 one of 960. Test with both sizes.
@@ -45,7 +46,6 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 Each bug has a test in `test/known-bugs.test.ts` that describes the correct behaviour and is skipped. To fix one: run its test with `RUN_KNOWN_BUGS=1` and `--test-name-pattern` (one at a time, because several crash the process), fix the code, remove the `knownBug(...)` from the test and delete the entry from this list.
 
 - `addTags([...])` with tags that are already stored calls `splice(index, 1)` with the index of the wrong array: it mutates the caller's array, duplicates tags and skips others.
-- With `autoReconnect`, an `ECONNREFUSED` reconnects without any delay and produces thousands of `error` events per second.
 - `DB12,D40`, the form the README documents for DWord, rejects with `Unknown data type: D`. The README also shows DInt examples (`ID140`, `MD100`, `DB2,D100`) that are actually DWord or don't work; the correct forms are `IDI`/`MDI`/`DB2,DI100`.
 - `DB1,STRING0.10` (with `STRING` instead of `S`) computes a length of 0 bytes, sends nothing, and the promise never settles.
 - `writeTags('DB1,INT0.3', [-1, 0, 1])` (a single tag as a string with an array value) writes zeros. Only `writeTags(['DB1,INT0.3'], [[-1, 0, 1]])` works.

@@ -57,9 +57,10 @@ export class FakePlc {
     private readonly outgoing: { socket: Socket; chunk: Buffer }[] = [];
     private draining = false;
 
-    static async start(): Promise<FakePlc> {
+    // Port 0 picks a free port; pass a port to bring a PLC up where a client is already trying to connect
+    static async start(port: number = 0): Promise<FakePlc> {
         const plc = new FakePlc();
-        plc.server.listen(0, '127.0.0.1');
+        plc.server.listen(port, '127.0.0.1');
         await once(plc.server, 'listening');
         return plc;
     }
@@ -327,8 +328,9 @@ export async function connectClient(plc: FakePlc, config: Partial<Nodes7CommConf
 // NodeS7Comm has no public way to disconnect yet (see CLAUDE.md), so this reaches into its private state
 export function disposeClients(): void {
     for (const client of openClients) {
-        const internals = client as unknown as { autoReconnect: boolean; client?: Socket };
+        const internals = client as unknown as { autoReconnect: boolean; client?: Socket; reconnectTimer?: NodeJS.Timeout };
         internals.autoReconnect = false;
+        clearTimeout(internals.reconnectTimer);
         internals.client?.destroy();
     }
     openClients.clear();

@@ -78,6 +78,36 @@ describe('connection', () => {
         assert.equal(plc.jobs.length, 1); // Proves the PDU was really negotiated, not left at a default
     });
 
+    it('waits before retrying when the connection is refused', async () => {
+        const client = createClient({ port: await getClosedPort(), autoReconnect: true });
+        let errors = 0;
+        client.on('error', () => {
+            errors += 1;
+        });
+        client.initiateConnection();
+        await new Promise(resolve => setTimeout(resolve, 500));
+        assert.equal(errors, 1, `${errors} error events in 500 ms`); // Used to be thousands
+    });
+
+    it('connects once an unreachable PLC comes back', async () => {
+        const port = await getClosedPort();
+        const client = createClient({ port, autoReconnect: true });
+        client.on('error', () => undefined);
+        const firstError = once(client, 'error');
+        client.initiateConnection();
+        await firstError;
+
+        const revived = await FakePlc.start(port); // The PLC comes up while the client waits to retry
+        try {
+            await once(client, 'connected');
+            assert.equal(revived.connectionRequests.length, 1);
+            assert.deepEqual(await client.readTags('MB0'), { MB0: 0 });
+        } finally {
+            disposeClients();
+            await revived.stop();
+        }
+    });
+
     it('emits connect-timeout when the PLC never confirms the ISO connection', async () => {
         plc.ignoreConnectionRequests = true;
         const client = createClient({ port: plc.port, requestTimeout: 100 }); // The ISO step uses requestTimeout, not connectionTimeout

@@ -8,6 +8,7 @@
 - fix: A PLC response split across several TCP segments was treated as invalid, so the connection dropped and the request failed with `'Timeout'`. Incoming data is now buffered until each packet is complete.
 - fix: An invalid reply to the PDU negotiation crashed the process with an unhandled rejection, and `connected` was emitted anyway. It now emits `error` with an `Error` and doesn't emit `connected`.
 - fix: When the PLC sent a fast acknowledgement before the PDU negotiation reply, `connected` was emitted before the negotiation finished and the first requests failed. The acknowledgement is now ignored and the client waits for the real reply.
+- fix: With `autoReconnect`, a failed connection attempt (for example a refused connection) was retried immediately, in a tight loop that emitted thousands of `error` events per second. Failed attempts are now retried after 2 seconds.
 - docs: The license now includes the copyright notice of nodeS7, which this library is ported from, as its MIT license requires.
 
 ## Breaking Changes

@@ -25,6 +25,7 @@ export class NodeS7Comm extends EventEmitter {
     private readonly maxGap: number = 10; // This is the byte tolerance for optimize
     private readonly requestMaxParallel: number = 8; // Our expected parrallels jobs
     private readonly requestMaxPDU: number = 960; // Our expected bytes size that we can send to the PLC
+    private readonly reconnectDelay: number = 2000; // Milliseconds to wait before retrying a failed connection attempt
 
     private readReq = Buffer.alloc(1500);
     private writeReq = Buffer.alloc(1500);
@@ -868,28 +869,14 @@ export class NodeS7Comm extends EventEmitter {
         if (packetType === 'ISO') {
             this.outputLog('Timeout connecting to the PLC - Disconnecting', 2);
             if (this.autoReconnect) {
-                this.outputLog('Wait for 2 seconds then try again', 2);
-                this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 3);
-                clearTimeout(this.reconnectTimer as NodeJS.Timeout);
-                const timeHandler = (): void => {
-                    this.outputLog('The scheduled reconnect from packetTimeout, connect type, is happening now', 3);
-                    this.connectionReset();
-                };
-                this.reconnectTimer = setTimeout(timeHandler, 2000);
+                this.scheduleReconnect();
             }
             return;
         }
         if (packetType === 'PDU') {
             this.outputLog('timeout waiting for PDU reply packet from PLC - Disconnecting', 2);
             if (this.autoReconnect) {
-                this.outputLog('Wait for 2 seconds then try again', 2);
-                this.outputLog('Scheduling a reconnect from packetTimeout, connect type', 3);
-                clearTimeout(this.reconnectTimer as NodeJS.Timeout);
-                const timeHandler = (): void => {
-                    this.outputLog('The scheduled reconnect from packetTimeout, PDU type, is happening now', 3);
-                    this.connectionReset();
-                };
-                this.reconnectTimer = setTimeout(timeHandler, 2000);
+                this.scheduleReconnect();
             }
             return;
         }
@@ -928,10 +915,26 @@ export class NodeS7Comm extends EventEmitter {
         }
     }
 
+    private scheduleReconnect(): void {
+        // Wait before retrying, so an unreachable PLC doesn't turn into a tight loop of connection attempts
+        this.outputLog(`Reconnecting in ${this.reconnectDelay} ms`, 2);
+        clearTimeout(this.reconnectTimer as NodeJS.Timeout);
+        this.reconnectTimer = setTimeout((): void => {
+            this.outputLog('The scheduled reconnect is happening now', 3);
+            this.connectionReset();
+        }, this.reconnectDelay);
+    }
+
     private connectError(err: Error): void {
+        // A connection attempt failed: never retry immediately
         this.isoConnectionState = 'disconnected';
         this.outputLog('We caught a connect error: ' + err.message, 1);
-        this.connectionReset();
+        if (this.client) {
+            this.client.destroy();
+        }
+        if (this.autoReconnect) {
+            this.scheduleReconnect();
+        }
     }
 
     private readWriteError(err: Error): void {
@@ -1572,11 +1575,7 @@ export class NodeS7Comm extends EventEmitter {
             this.outputLog(theData, 3);
 
             if (this.autoReconnect) {
-                clearTimeout(this.reconnectTimer as NodeJS.Timeout);
-                const timeHandler = (): void => {
-                    this.connectionReset();
-                };
-                this.reconnectTimer = setTimeout(timeHandler, 2000);
+                this.scheduleReconnect();
             } else {
                 this.connectionReset();
             }
