@@ -1,12 +1,13 @@
 // Each test describes the expected behaviour of a known bug (see "Known issues" in CLAUDE.md) and is skipped
-// until the bug is fixed. Several of them crash the test process instead of failing, so run them one at a time:
-//   RUN_KNOWN_BUGS=1 node --test --test-name-pattern="DB12,D40" test/known-bugs.test.ts
+// until the bug is fixed. A bug can crash the test process instead of failing, so run them one at a time:
+//   RUN_KNOWN_BUGS=1 node --test --test-name-pattern="<test name>" test/known-bugs.test.ts
+// When a bug is fixed, move its test to the file that covers that area and drop the knownBug(...) option.
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
-import assert from 'node:assert/strict';
-import { AREA, FakePlc, connectClient, disposeClients } from './helpers/fake-plc.ts';
+import { describe, beforeEach, afterEach } from 'node:test';
+import { FakePlc, disposeClients } from './helpers/fake-plc.ts';
 
-const knownBug = (reason: string): { skip: string | false } => ({ skip: process.env.RUN_KNOWN_BUGS ? false : `known bug: ${reason}` });
+// Usage: it('does the right thing', knownBug('what happens instead'), async () => { ... });
+export const knownBug = (reason: string): { skip: string | false } => ({ skip: process.env.RUN_KNOWN_BUGS ? false : `known bug: ${reason}` });
 
 describe('known bugs', () => {
     let plc: FakePlc;
@@ -20,9 +21,5 @@ describe('known bugs', () => {
         await plc.stop();
     });
 
-    it('writes DWORD arrays with values of 2^31 or more', knownBug('uses writeInt32BE for DWORD arrays and rejects with a RangeError'), async () => {
-        const client = await connectClient(plc);
-        await client.writeTags(['MD0.2'], [[0xdeadbeef, 1]]);
-        assert.deepEqual([...plc.area(AREA.M).subarray(0, 8)], [0xde, 0xad, 0xbe, 0xef, 0x00, 0x00, 0x00, 0x01]);
-    });
+    // No known bugs right now.
 });

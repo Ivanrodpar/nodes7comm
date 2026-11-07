@@ -41,12 +41,11 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 - Await every client promise: an unhandled rejection crashes the test process.
 - The existing tests pin the **current** behaviour, including the odd parts (for example, that a timeout rejects with the string `'Timeout'`, or that `readAllTags()` with no tags resolves to `[]`). If a change breaks one of them, it is an API change: that's allowed because the next release is 3.0.0, but it must be intentional. Update the test and record it under `## Breaking Changes` in `Unreleased`.
 
-## Known issues (verified on 2026-10-31; update this list as each one is fixed)
+## Known issues (updated on 2026-11-06)
 
-Each bug has a test in `test/known-bugs.test.ts` that describes the correct behaviour and is skipped. To fix one: run its test with `RUN_KNOWN_BUGS=1` and `--test-name-pattern` (one at a time, because several crash the process), fix the code, remove the `knownBug(...)` from the test and delete the entry from this list.
+The ten bugs found on 2026-10-31 are fixed (see `Unreleased` in the CHANGELOG). When a new bug is found, add a test to `test/known-bugs.test.ts` that describes the correct behaviour and pass it `knownBug('what happens instead')` so it's skipped, then list the bug here. To fix one: run its test with `RUN_KNOWN_BUGS=1` and `--test-name-pattern` (one at a time, a bug can crash the process), fix the code, move the test to the file that covers that area without `knownBug(...)`, and delete the entry from this list.
 
-- `bufferizeValue` uses `writeInt32BE` for DWORD arrays, so values ≥ 2^31 reject with a `RangeError`.
-- Unverified: in `S7AddrToBuffer`, the timer/counter branch compares `address.Type === 'TIMER'`, but `Type` is `'T'`/`'C'`, so that branch never runs.
+- Unverified (the fake PLC doesn't simulate them, so it needs real hardware): in `S7AddrToBuffer`, the timer/counter branch compares `address.Type === 'TIMER'`, but `Type` is `'T'`/`'C'`, so that branch never runs and timers/counters are requested like plain bytes.
 
 ## Planned for 3.0.0 (API changes, not started)
 

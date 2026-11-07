@@ -636,7 +636,7 @@ export class NodeS7Comm extends EventEmitter {
                         writeBuffer.writeDoubleBE((writeValue as number[])[arrayIndex], thePointer);
                         break;
                     case 'DWORD':
-                        writeBuffer.writeInt32BE((writeValue as number[])[arrayIndex], thePointer);
+                        writeBuffer.writeUInt32BE((writeValue as number[])[arrayIndex], thePointer); // Unsigned, like single DWORD values
                         break;
                     case 'DINT':
                         writeBuffer.writeInt32BE((writeValue as number[])[arrayIndex], thePointer);

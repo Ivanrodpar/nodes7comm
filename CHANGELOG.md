@@ -14,6 +14,7 @@
 - fix: `DB12,D40`, the DWord form documented in the README, rejected with `Unknown data type: D`. `D` now means DWord in data blocks too, as `ID`, `QD` and `MD` already did in the other areas.
 - docs: The README showed DWord addresses as DInt examples (`ID140`, `MD100`, `DB2,D100`); they are now `IDI140`, `MDI100` and `DB2,DI100`.
 - fix: `DB1,STRING0.10` (`STRING` instead of `S`) was read as an empty item, so no request was sent and the promise never settled. `STRING` now works like `S`, and any address that would read 0 bytes (for example `DB1,S0` without a length) rejects with `Invalid length`.
+- fix: Writing a DWORD array with a value of 2^31 or more rejected with a `RangeError`, because arrays were written as signed integers. They are now unsigned, like single DWORD values.
 - docs: The license now includes the copyright notice of nodeS7, which this library is ported from, as its MIT license requires.
 
 ## Breaking Changes

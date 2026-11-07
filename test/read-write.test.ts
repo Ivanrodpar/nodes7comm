@@ -86,6 +86,12 @@ describe('reading and writing', () => {
             assert.deepEqual([...plc.db(1).subarray(0, 6)], [0xff, 0xff, 0x00, 0x00, 0x00, 0x01]);
         });
 
+        it('reads and writes DWORD arrays with values of 2^31 or more', async () => {
+            await client.writeTags('MD0.2', [0xdeadbeef, 1]);
+            assert.deepEqual([...plc.area(AREA.M).subarray(0, 8)], [0xde, 0xad, 0xbe, 0xef, 0x00, 0x00, 0x00, 0x01]);
+            assert.deepEqual(await client.readTags('MD0.2'), { 'MD0.2': [0xdeadbeef, 1] });
+        });
+
         it('writes an array when the tag is passed as a string', async () => {
             assert.deepEqual(await client.writeTags('DB1,INT0.3', [-1, 0, 1]), { 'DB1,INT0.3': [-1, 0, 1] });
             assert.deepEqual([...plc.db(1).subarray(0, 6)], [0xff, 0xff, 0x00, 0x00, 0x00, 0x01]);
