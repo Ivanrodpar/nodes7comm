@@ -22,11 +22,19 @@ export interface SendWriteRequest {
     writeRequestSequence: number; // Number of parts that the request are splitter in 2 or more parts
 }
 
+// Why a read or write item failed. It becomes an S7Error for each tag when its promise is rejected
+export interface RequestFailure {
+    code: 'TIMEOUT' | 'PLC_ERROR' | 'INVALID_RESPONSE';
+    plcCode?: number; // Return code sent by the PLC, for PLC_ERROR
+    detail?: string; // What was wrong with the response, for INVALID_RESPONSE
+}
+
 export interface ReadBlock extends OptimizableReadBlocks {
     parts: number;
     readRequestSequence: number;
     readValue?: Buffer;
     responseBuffer?: Buffer;
+    responseFailure?: RequestFailure;
 }
 
 export interface OptimizableReadBlocks {
@@ -62,6 +70,7 @@ export interface S7ItemWrite {
     writeQuality: string[] | string;
     writeBuffer: Buffer;
     validResponseBuffer: boolean;
+    responseFailure?: RequestFailure;
     quality: string[] | string;
     writeValue: any;
     valid: boolean;

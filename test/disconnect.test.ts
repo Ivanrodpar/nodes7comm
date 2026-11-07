@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { FakePlc, connectClient, createClient, disposeClients, getClosedPort } from './helpers/fake-plc.ts';
+import { FakePlc, connectClient, createClient, disposeClients, getClosedPort, isS7Error } from './helpers/fake-plc.ts';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -40,8 +40,8 @@ describe('disconnect()', () => {
         const client = await connectClient(plc, { requestTimeout: 5000 });
         plc.silent = true;
         // Attach the assertions before disconnecting: the promises reject while disconnect() runs
-        const read = assert.rejects(client.readTags('MB0'), /Disconnected/);
-        const write = assert.rejects(client.writeTags('MB1', 1), /Disconnected/);
+        const read = assert.rejects(client.readTags('MB0'), isS7Error('DISCONNECTED', { tag: 'MB0' }));
+        const write = assert.rejects(client.writeTags('MB1', 1), isS7Error('DISCONNECTED', { tag: 'MB1' }));
         const started = Date.now();
         await client.disconnect();
         await read;
@@ -53,7 +53,7 @@ describe('disconnect()', () => {
         plc.maxParallel = 1;
         const client = await connectClient(plc);
         plc.silent = true;
-        const reads = ['DB1,INT0', 'DB2,INT0', 'DB3,INT0'].map(tag => assert.rejects(client.readTags(tag), /Disconnected/));
+        const reads = ['DB1,INT0', 'DB2,INT0', 'DB3,INT0'].map(tag => assert.rejects(client.readTags(tag), isS7Error('DISCONNECTED', { tag })));
         await sleep(20); // Let the first request reach the PLC
         assert.equal(plc.jobs.length, 1); // One sent, two queued
         await client.disconnect();
@@ -63,7 +63,7 @@ describe('disconnect()', () => {
     it('rejects every tag of a large read whose parts are in flight', async () => {
         const client = await connectClient(plc);
         plc.silent = true;
-        const read = assert.rejects(client.readTags(['DB1,S0.254', 'MB0']), /Disconnected/);
+        const read = assert.rejects(client.readTags(['DB1,S0.254', 'MB0']), isS7Error('DISCONNECTED'));
         await client.disconnect();
         await read;
     });

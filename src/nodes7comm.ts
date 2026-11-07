@@ -4,10 +4,45 @@ import { format } from 'util';
 import { EventEmitter } from 'events';
 
 import type { ConnectionState, PacketTimeout, Nodes7CommConfig } from './types/nodes7comm-config.types.ts';
-import type { RequestQueue, SendReadRequest, SendWriteRequest, S7ItemWrite, ReadBlock, S7PreparedReadRequest, S7PreparedWriteRequest, OptimizableReadBlocks, WriteBlock } from './types/request.types.ts';
+import type { RequestQueue, SendReadRequest, SendWriteRequest, S7ItemWrite, ReadBlock, S7PreparedReadRequest, S7PreparedWriteRequest, OptimizableReadBlocks, WriteBlock, RequestFailure } from './types/request.types.ts';
 import type { Address } from './types/address.types.ts';
 import type { NodeS7CommEvents } from './types/nodes7comm-events.types.ts';
 import { getEmptyAddress, getEmptyS7ItemWrite } from './address.ts';
+
+export type S7ErrorCode = 'TIMEOUT' | 'PLC_ERROR' | 'INVALID_RESPONSE' | 'CONNECTION_LOST' | 'DISCONNECTED' | 'NOT_CONNECTED';
+
+/**
+ * Error used to reject reads and writes. Check `code` instead of parsing the message:
+ * - `PLC_ERROR`: the PLC answered with an error; `plcCode` holds its return code (for example 0x05, address out of range).
+ * - `TIMEOUT`: the PLC didn't answer within `requestTimeout`.
+ * - `INVALID_RESPONSE`: the PLC's answer couldn't be decoded.
+ * - `CONNECTION_LOST`: the connection dropped before the request was sent.
+ * - `DISCONNECTED`: `disconnect()` was called before the request was answered.
+ * - `NOT_CONNECTED`: the request was made while not connected.
+ */
+export class S7Error extends Error {
+    readonly code: S7ErrorCode;
+    readonly plcCode: number | undefined; // Return code sent by the PLC, only for PLC_ERROR
+    readonly tag: string | undefined; // Tag the error refers to, when there is one
+
+    constructor(code: S7ErrorCode, message: string, details: { plcCode?: number; tag?: string } = {}) {
+        super(message);
+        this.name = 'S7Error';
+        this.code = code;
+        this.plcCode = details.plcCode;
+        this.tag = details.tag;
+    }
+}
+
+// Item return codes of the S7 protocol (0xff means success)
+const PLC_RETURN_CODES: { [code: number]: string } = {
+    0x01: 'hardware fault',
+    0x03: 'access to the object not allowed',
+    0x05: 'address out of range',
+    0x06: 'data type not supported',
+    0x07: 'data type inconsistent',
+    0x0a: 'object does not exist',
+};
 
 // Typed events. `extends EventEmitter<Events>` would replace this merge, but consumers on an older @types/node (non-generic EventEmitter) would break.
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
@@ -155,16 +190,8 @@ export class NodeS7Comm extends EventEmitter {
 
     private rejectAllRequestQueue(): void {
         this.outputLog('We detect a connection error, we are rejecting all request', 2);
-        for (let i = 0; i < this.requestQueue.length; i++) {
-            if (this.requestQueue[i].action === 'read') {
-                const req = this.requestQueue[i].request as SendReadRequest;
-                for (let u = 0; u < req.requestList.length; u++) {
-                    (req.requestList[u].addresses[0].promiseReject as (reason: string) => void)('We detect a connection error, we are rejecting all request');
-                }
-            } else {
-                const req = this.requestQueue[i].request as SendWriteRequest;
-                (req.requestList[0].itemReference.address.promiseReject as (reason: string) => void)('We detect a connection error, we are rejecting all request');
-            }
+        for (const request of this.requestQueue) {
+            this.rejectRequest(request, tag => new S7Error('CONNECTION_LOST', `The connection to the PLC was lost before ${tag} was sent`, { tag }));
         }
         this.requestQueue = [];
     }
@@ -997,6 +1024,7 @@ export class NodeS7Comm extends EventEmitter {
         if (!theData) {
             this.outputLog('Timeout write error', 1);
             theItem.validResponseBuffer = false;
+            theItem.responseFailure = { code: 'TIMEOUT' };
             return 0;
         }
 
@@ -1004,6 +1032,7 @@ export class NodeS7Comm extends EventEmitter {
 
         if (remainingLength < 1) {
             theItem.validResponseBuffer = false;
+            theItem.responseFailure = { code: 'INVALID_RESPONSE', detail: 'missing item return code' };
             this.outputLog('Malformed packet - less than 1 byte', 1);
             return 0; // Hard to increment the pointer so we call it a malformed packet and we're done.
         }
@@ -1014,13 +1043,14 @@ export class NodeS7Comm extends EventEmitter {
         if (writeResponse !== 0xff) {
             this.outputLog(`Received write error of ${theItem.writeResponse} on ${theItem.address.name}`, 1);
             theItem.validResponseBuffer = false;
+            theItem.responseFailure = { code: 'PLC_ERROR', plcCode: writeResponse };
         } else {
             theItem.validResponseBuffer = true;
         }
         return thePointer + 1;
     }
 
-    private validateReadResponse(theData: Buffer | undefined, request: ReadBlock, thePointer: number): { thePointer: number; bufferResponse: Buffer | undefined } {
+    private validateReadResponse(theData: Buffer | undefined, request: ReadBlock, thePointer: number): { thePointer: number; bufferResponse: Buffer | undefined; failure?: RequestFailure } {
         let remainingLength;
 
         if (typeof theData === 'undefined') {
@@ -1034,10 +1064,10 @@ export class NodeS7Comm extends EventEmitter {
         if (remainingLength < 4) {
             if (typeof theData !== 'undefined') {
                 this.outputLog('Malformed Packet - Less Than 4 Bytes', 1);
-            } else {
-                this.outputLog('Timeout error - zero length packet', 1);
+                return { thePointer: 0, bufferResponse: undefined, failure: { code: 'INVALID_RESPONSE', detail: 'item shorter than 4 bytes' } };
             }
-            return { thePointer: 0, bufferResponse: undefined };
+            this.outputLog('Timeout error - zero length packet', 1);
+            return { thePointer: 0, bufferResponse: undefined, failure: { code: 'TIMEOUT' } };
         }
 
         let reportedDataLength;
@@ -1055,24 +1085,24 @@ export class NodeS7Comm extends EventEmitter {
         }
         if (remainingLength < reportedDataLength + 2) {
             this.outputLog(`Malformed packet - Item data length and packet length disagree. RDL+2 ${reportedDataLength + 2} remainingLength: ${remainingLength}`, 1);
-            return { thePointer: 0, bufferResponse: undefined };
+            return { thePointer: 0, bufferResponse: undefined, failure: { code: 'INVALID_RESPONSE', detail: "item length doesn't match the packet length" } };
         }
 
         if (responseCode !== 0xff) {
             this.outputLog(`Invalid response code - ${responseCode}`, 1);
-            return { thePointer: thePointer + reportedDataLength + 4, bufferResponse: undefined };
+            return { thePointer: thePointer + reportedDataLength + 4, bufferResponse: undefined, failure: { code: 'PLC_ERROR', plcCode: responseCode } };
         }
 
         if (transportCode !== request.addresses[0].transportCode) {
             this.outputLog(`Invalid transport code - ${transportCode}`, 1);
-            return { thePointer: thePointer + reportedDataLength + 4, bufferResponse: undefined };
+            return { thePointer: thePointer + reportedDataLength + 4, bufferResponse: undefined, failure: { code: 'INVALID_RESPONSE', detail: `unexpected transport size 0x${transportCode.toString(16)}` } };
         }
 
         const expectedLength = request.totalbyteLength;
 
         if (reportedDataLength !== expectedLength) {
             this.outputLog(`Invalid response length - expected ${expectedLength} but got ${reportedDataLength} bytes`, 1);
-            return { thePointer: reportedDataLength + 2, bufferResponse: undefined };
+            return { thePointer: reportedDataLength + 2, bufferResponse: undefined, failure: { code: 'INVALID_RESPONSE', detail: `expected ${expectedLength} bytes, got ${reportedDataLength}` } };
         }
 
         // Looks good so far.
@@ -1264,10 +1294,27 @@ export class NodeS7Comm extends EventEmitter {
         }
     }
 
-    private rejectReadBlock(block: ReadBlock, reason: string): void {
+    private failureToError(failure: RequestFailure, tag: string): S7Error {
+        if (failure.code === 'PLC_ERROR') {
+            const code = failure.plcCode as number;
+            const description = PLC_RETURN_CODES[code] ?? 'unknown error';
+            return new S7Error('PLC_ERROR', `The PLC rejected ${tag}: ${description} (code 0x${code.toString(16).padStart(2, '0')})`, { plcCode: code, tag });
+        }
+        if (failure.code === 'TIMEOUT') {
+            return new S7Error('TIMEOUT', `No answer from the PLC for ${tag} within ${this.requestTimeout} ms`, { tag });
+        }
+        return new S7Error('INVALID_RESPONSE', `Invalid response from the PLC for ${tag}${failure.detail ? `: ${failure.detail}` : ''}`, { tag });
+    }
+
+    // When an item can't be decoded, the items after it in the same packet are left without a failure of their own
+    private unknownFailure(data: Buffer | undefined): RequestFailure {
+        return data ? { code: 'INVALID_RESPONSE', detail: 'a previous item in the same response could not be decoded' } : { code: 'TIMEOUT' };
+    }
+
+    private rejectReadBlock(block: ReadBlock, failure: RequestFailure): void {
         this.outputLog(`Error trying to read in ${block.addresses[0].userName}. Rejecting promise`, 3);
         for (const address of block.addresses) {
-            (address.promiseReject as (reason: string) => void)(reason);
+            (address.promiseReject as unknown as (reason: Error) => void)(this.failureToError(failure, address.userName));
         }
     }
 
@@ -1283,9 +1330,10 @@ export class NodeS7Comm extends EventEmitter {
         (block.itemReference.address.promiseResolve as (result: { [key: string]: any }) => void)(result);
     }
 
-    private rejectWriteBlock(block: WriteBlock, reason: string): void {
+    private rejectWriteBlock(block: WriteBlock, failure: RequestFailure): void {
         this.outputLog(`Error trying to write in ${block.itemReference.address.name}. Rejecting promise`, 3);
-        (block.itemReference.address.promiseReject as (reason: string) => void)(reason);
+        const address = block.itemReference.address;
+        (address.promiseReject as unknown as (reason: Error) => void)(this.failureToError(failure, address.userName));
     }
 
     private readResponse(data: Buffer | undefined, foundSeqIndex: number): void {
@@ -1314,9 +1362,10 @@ export class NodeS7Comm extends EventEmitter {
         let dataPointer = 21; // For non-routed packets we start at byte 21 of the packet.  If we do routing it will be more than this.
 
         for (let i = 0; i < this.sentReadPacketArray[foundSeqIndex].requestList.length; i++) {
-            const { thePointer, bufferResponse } = this.validateReadResponse(data, this.sentReadPacketArray[foundSeqIndex].requestList[i], dataPointer);
+            const { thePointer, bufferResponse, failure } = this.validateReadResponse(data, this.sentReadPacketArray[foundSeqIndex].requestList[i], dataPointer);
             dataPointer = thePointer;
             this.sentReadPacketArray[foundSeqIndex].requestList[i].responseBuffer = bufferResponse;
+            this.sentReadPacketArray[foundSeqIndex].requestList[i].responseFailure = failure;
             if (!dataPointer) {
                 this.outputLog('Received a zero response processing read packet due to unrecoverable packet error', 1);
                 break;
@@ -1328,25 +1377,21 @@ export class NodeS7Comm extends EventEmitter {
                 if (block.responseBuffer) {
                     this.resolveReadBlock(block, block.responseBuffer);
                 } else {
-                    this.rejectReadBlock(block, 'Timeout');
+                    this.rejectReadBlock(block, block.responseFailure ?? this.unknownFailure(data));
                 }
             } else if (this.isReadSequenceReceived(block.readRequestSequence)) {
                 // Every part has arrived: put them back together in a buffer that starts at the first address
                 const parts = this.sentReadPacketArray.flatMap(sentReadPacket => sentReadPacket.requestList.filter(part => part.readRequestSequence === block.readRequestSequence));
                 const start = block.addresses[0].offset;
                 const buffer = Buffer.alloc(Math.max(...parts.map(part => part.offset - start + part.totalbyteLength)));
-                let validResponse = true;
-                for (const part of parts) {
-                    if (part.responseBuffer) {
-                        part.responseBuffer.copy(buffer, part.offset - start);
-                    } else {
-                        validResponse = false;
+                const failedPart = parts.find(part => !part.responseBuffer);
+                if (!failedPart) {
+                    for (const part of parts) {
+                        (part.responseBuffer as Buffer).copy(buffer, part.offset - start);
                     }
-                }
-                if (validResponse) {
                     this.resolveReadBlock(block, buffer);
                 } else {
-                    this.rejectReadBlock(block, data ? 'Invalid response' : 'Timeout');
+                    this.rejectReadBlock(block, failedPart.responseFailure ?? this.unknownFailure(data));
                 }
             } else {
                 this.outputLog(`Wait for the other parts of read request with sequence ${block.readRequestSequence}`, 3);
@@ -1395,15 +1440,16 @@ export class NodeS7Comm extends EventEmitter {
                 if (block.itemReference.validResponseBuffer) {
                     this.resolveWriteBlock(block);
                 } else {
-                    this.rejectWriteBlock(block, 'Timeout');
+                    this.rejectWriteBlock(block, block.itemReference.responseFailure ?? this.unknownFailure(data));
                 }
             } else if (this.isWriteSequenceReceived(block.writeRequestSequence)) {
                 // Every part has been answered: the write succeeded only if all of them did
                 const parts = this.sentWritePacketArray.flatMap(sentWritePacket => sentWritePacket.requestList.filter(part => part.writeRequestSequence === block.writeRequestSequence));
-                if (parts.every(part => part.itemReference.validResponseBuffer)) {
+                const failedPart = parts.find(part => !part.itemReference.validResponseBuffer);
+                if (!failedPart) {
                     this.resolveWriteBlock(block);
                 } else {
-                    this.rejectWriteBlock(block, data ? 'Invalid response' : 'Timeout');
+                    this.rejectWriteBlock(block, failedPart.itemReference.responseFailure ?? this.unknownFailure(data));
                 }
             } else {
                 this.outputLog(`Wait for the other parts of write request with sequence ${block.writeRequestSequence}`, 3);
@@ -1792,9 +1838,9 @@ export class NodeS7Comm extends EventEmitter {
         }
     }
 
-    private rejectRequest(request: RequestQueue | SendReadRequest | SendWriteRequest, reason: Error): void {
+    private rejectRequest(request: RequestQueue | SendReadRequest | SendWriteRequest, makeError: (tag: string) => Error): void {
         // Reject every address of a queued or sent packet (the parts of a split tag share one promise; rejecting twice is harmless)
-        const reject = (address: Address): void => (address.promiseReject as unknown as (reason: Error) => void)(reason);
+        const reject = (address: Address): void => (address.promiseReject as unknown as (reason: Error) => void)(makeError(address.userName));
         const packet = 'action' in request ? request.request : request;
         for (const block of packet.requestList as (ReadBlock | WriteBlock)[]) {
             if ('addresses' in block) {
@@ -1805,13 +1851,13 @@ export class NodeS7Comm extends EventEmitter {
         }
     }
 
-    private rejectAllPending(reason: Error): void {
+    private rejectAllPending(makeError: (tag: string) => Error): void {
         for (const request of this.requestQueue) {
-            this.rejectRequest(request, reason);
+            this.rejectRequest(request, makeError);
         }
         for (const packet of [...this.sentReadPacketArray, ...this.sentWritePacketArray]) {
             clearTimeout(packet.timeout);
-            this.rejectRequest(packet, reason);
+            this.rejectRequest(packet, makeError);
         }
         this.requestQueue = [];
         this.sentReadPacketArray = [];
@@ -2235,7 +2281,7 @@ export class NodeS7Comm extends EventEmitter {
         clearTimeout(this.connectTimeout as NodeJS.Timeout);
         clearTimeout(this.PDUTimeout as NodeJS.Timeout);
         this.isoConnectionState = 'disconnected';
-        this.rejectAllPending(new Error('Disconnected'));
+        this.rejectAllPending(tag => new S7Error('DISCONNECTED', `Disconnected before ${tag} was answered`, { tag }));
         // If a connection step is in progress, end it now: its socket is about to be destroyed and it would never settle
         this.abortConnecting?.(new Error('Disconnected'));
         this.abortConnecting = undefined;
@@ -2320,7 +2366,7 @@ export class NodeS7Comm extends EventEmitter {
     public async readTags(tags: string | string[]): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
             this.outputLog('Unable to read when not connected', 1);
-            return Promise.reject(new Error('Unable to read when not connected'));
+            return Promise.reject(new S7Error('NOT_CONNECTED', 'Unable to read when not connected'));
         }
 
         // Here we store the tags provided
@@ -2363,7 +2409,7 @@ export class NodeS7Comm extends EventEmitter {
     public async readAllTags(): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
             this.outputLog('Unable to read when not connected', 1);
-            return Promise.reject(new Error('Unable to read when not connected'));
+            return Promise.reject(new S7Error('NOT_CONNECTED', 'Unable to read when not connected'));
         }
         // If we no have adresses stored, we immediately return an empty array
         if (this.storedAdresses.length === 0) {
@@ -2406,7 +2452,7 @@ export class NodeS7Comm extends EventEmitter {
     public async writeTags(tags: string | string[], value: any | any[]): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
             this.outputLog('Unable to write when not connected.', 1);
-            return Promise.reject(new Error('Unable to write when not connected'));
+            return Promise.reject(new S7Error('NOT_CONNECTED', 'Unable to write when not connected'));
         }
 
         // Here we store the tags provided

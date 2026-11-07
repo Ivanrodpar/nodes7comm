@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NodeS7Comm } from '../lib/index.js';
-import { FakePlc, connectClient, disposeClients } from './helpers/fake-plc.ts';
+import { FakePlc, connectClient, createClient, disposeClients, isS7Error } from './helpers/fake-plc.ts';
 
 describe('request building', () => {
     let plc: FakePlc;
@@ -75,18 +75,63 @@ describe('request building', () => {
 
     it('rejects a read when the PLC reports an item error, and keeps the connection', async () => {
         plc.itemReturnCode = () => 0x0a; // Object does not exist
-        await assert.rejects(client.readTags('DB1,INT0'));
+        await assert.rejects(client.readTags('DB1,INT0'), isS7Error('PLC_ERROR', { plcCode: 0x0a, tag: 'DB1,INT0', message: /^The PLC rejected DB1,INT0: object does not exist \(code 0x0a\)$/ }));
         plc.itemReturnCode = () => 0xff;
         assert.deepEqual(await client.readTags('DB1,INT0'), { 'DB1,INT0': 0 });
     });
 
     it('rejects a write when the PLC reports an item error, and keeps the connection', async () => {
         plc.itemReturnCode = () => 0x05; // Address out of range
-        await assert.rejects(client.writeTags('DB1,INT0', 7));
+        await assert.rejects(client.writeTags('DB1,INT0', 7), isS7Error('PLC_ERROR', { plcCode: 0x05, tag: 'DB1,INT0', message: /address out of range \(code 0x05\)/ }));
         assert.equal(plc.db(1).readInt16BE(0), 0);
         plc.itemReturnCode = () => 0xff;
         await client.writeTags('DB1,INT0', 7);
         assert.equal(plc.db(1).readInt16BE(0), 7);
+    });
+
+    describe('S7Error', () => {
+        it('names the tag that failed when several are read in one call', async () => {
+            plc.itemReturnCode = item => (item.dbNumber === 2 ? 0x0a : 0xff); // Only DB2 is missing
+            const results = await Promise.allSettled([client.readTags('DB1,INT0'), client.readTags('DB2,INT0')]);
+            assert.equal(results[0].status, 'fulfilled');
+            assert.equal(results[1].status, 'rejected');
+            assert.ok(isS7Error('PLC_ERROR', { plcCode: 0x0a, tag: 'DB2,INT0' })((results[1] as PromiseRejectedResult).reason));
+        });
+
+        it('describes a return code it does not know', async () => {
+            plc.itemReturnCode = () => 0x42;
+            await assert.rejects(client.readTags('MB0'), isS7Error('PLC_ERROR', { plcCode: 0x42, message: /unknown error \(code 0x42\)/ }));
+        });
+
+        it('is an Error with a name, so it prints and logs like one', async () => {
+            plc.itemReturnCode = () => 0x05;
+            const err = await client.readTags('MB0').catch(error => error);
+            assert.ok(err instanceof Error);
+            assert.equal(err.name, 'S7Error');
+            assert.ok(String(err).startsWith('S7Error: The PLC rejected MB0'));
+        });
+
+        it('rejects with NOT_CONNECTED when there is no connection', async () => {
+            const offline = createClient({ port: plc.port });
+            await assert.rejects(offline.readTags('MB0'), isS7Error('NOT_CONNECTED'));
+            await assert.rejects(offline.readAllTags(), isS7Error('NOT_CONNECTED'));
+            await assert.rejects(offline.writeTags('MB0', 1), isS7Error('NOT_CONNECTED'));
+        });
+
+        it('rejects queued requests with CONNECTION_LOST when the connection drops', async () => {
+            const restricted = await FakePlc.start();
+            restricted.maxParallel = 1;
+            restricted.silent = true;
+            try {
+                const limited = await connectClient(restricted, { requestTimeout: 100 });
+                const sent = assert.rejects(limited.readTags('DB1,INT0'), isS7Error('TIMEOUT', { tag: 'DB1,INT0' }));
+                const queued = assert.rejects(limited.readTags('DB2,INT0'), isS7Error('CONNECTION_LOST', { tag: 'DB2,INT0' }));
+                await Promise.all([sent, queued]);
+            } finally {
+                await disposeClients();
+                await restricted.stop();
+            }
+        });
     });
 
     describe('TCP segmentation', () => {

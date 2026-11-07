@@ -5,10 +5,20 @@
 import { createServer } from 'node:net';
 import type { AddressInfo, Server, Socket } from 'node:net';
 import { once } from 'node:events';
-import { NodeS7Comm } from '../../lib/index.js';
-import type { Nodes7CommConfig } from '../../lib/index.js';
+import { NodeS7Comm, S7Error } from '../../lib/index.js';
+import type { Nodes7CommConfig, S7ErrorCode } from '../../lib/index.js';
 
 export const AREA = { I: 0x81, Q: 0x82, M: 0x83, DB: 0x84 } as const;
+
+// Validator for assert.rejects: an S7Error with this code (and, optionally, these other properties)
+export const isS7Error =
+    (code: S7ErrorCode, expected: { plcCode?: number; tag?: string; message?: RegExp } = {}) =>
+    (err: unknown): boolean => {
+        if (!(err instanceof S7Error) || err.code !== code) {
+            return false;
+        }
+        return (expected.plcCode === undefined || err.plcCode === expected.plcCode) && (expected.tag === undefined || err.tag === expected.tag) && (expected.message === undefined || expected.message.test(err.message));
+    };
 
 export interface S7Item {
     area: number;

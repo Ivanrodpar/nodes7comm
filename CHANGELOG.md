@@ -1,6 +1,7 @@
 ### Unreleased
 
-- feat: Added `disconnect()`. It closes the connection and stops reconnecting, rejects pending reads and writes right away with `Error('Disconnected')`, emits `disconnected`, and resolves once the socket is closed. It's safe to call twice or while connecting, and `initiateConnection()` connects again afterwards.
+- feat: Added `S7Error`, exported with its `S7ErrorCode` type. Reads and writes now reject with it, and its `code` says what happened: `PLC_ERROR` (with the PLC's return code in `plcCode`), `TIMEOUT`, `INVALID_RESPONSE`, `CONNECTION_LOST`, `DISCONNECTED` or `NOT_CONNECTED`. `tag` names the tag that failed.
+- feat: Added `disconnect()`. It closes the connection and stops reconnecting, rejects pending reads and writes right away with an `S7Error` whose code is `DISCONNECTED`, emits `disconnected`, and resolves once the socket is closed. It's safe to call twice or while connecting, and `initiateConnection()` connects again afterwards.
 - test: Added an automated test suite that runs against a simulated S7 PLC (`npm test`).
 - build: Updated the development tooling to TypeScript 6, ESLint 10 and Prettier 3.
 - build: Removed ts-node and the manual `src/test/test.ts` script that ran against a real PLC; the automated suite replaces it.
@@ -25,6 +26,7 @@
 - Requires Node.js `^20.19.0 || >=22.12.0` (declared in `engines`).
 - Added an `exports` map: only the package root can be imported. Deep imports such as `nodes7comm/lib/...` no longer work.
 - TypeScript users need TypeScript 5.0 or newer, or 5.8 or newer when importing from CommonJS files with `"module": "nodenext"`.
+- Reads and writes reject with an `S7Error` instead of a string. Replace checks such as `err === 'Timeout'` with `err.code === 'TIMEOUT'`. An error answered by the PLC (a missing DB, an address out of range...) used to reject with `'Timeout'` too; it is now `PLC_ERROR`, with a message like `The PLC rejected DB206,REAL132: address out of range (code 0x05)`.
 - `writeTags` rejects values that don't match their tag, without writing anything: array tags need an array with exactly one value per element (CHAR arrays take a string), and single-value tags reject arrays. Before, those values were written as zeros or garbage, and `writeTags('MB0', [5])` wrote `5`.
 
 

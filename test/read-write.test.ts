@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NodeS7Comm } from '../lib/index.js';
-import { AREA, FakePlc, connectClient, disposeClients } from './helpers/fake-plc.ts';
+import { AREA, FakePlc, connectClient, disposeClients, isS7Error } from './helpers/fake-plc.ts';
 
 const spaces = (count: number): number[] => new Array(count).fill(0x20);
 
@@ -183,10 +183,10 @@ describe('reading and writing', () => {
             }
         });
 
-        it('rejects a large read with "Timeout" when the PLC stops answering', async () => {
+        it('rejects a large read with a TIMEOUT S7Error when the PLC stops answering', async () => {
             const impatient = await connectClient(plc, { requestTimeout: 100 });
             plc.silent = true;
-            await assert.rejects(impatient.readTags('DB1,S0.254'), reason => reason === 'Timeout');
+            await assert.rejects(impatient.readTags('DB1,S0.254'), isS7Error('TIMEOUT', { tag: 'DB1,S0.254' }));
         });
 
         it('writes a single tag larger than the PDU', async () => {
@@ -233,17 +233,17 @@ describe('reading and writing', () => {
             }
         });
 
-        it('rejects a large write with "Timeout" when the PLC stops answering', async () => {
+        it('rejects a large write with a TIMEOUT S7Error when the PLC stops answering', async () => {
             const impatient = await connectClient(plc, { requestTimeout: 100 });
             plc.silent = true;
-            await assert.rejects(impatient.writeTags('DB1,S0.254', 'y'.repeat(230)), reason => reason === 'Timeout');
+            await assert.rejects(impatient.writeTags('DB1,S0.254', 'y'.repeat(230)), isS7Error('TIMEOUT', { tag: 'DB1,S0.254' }));
             // The second part times out after the first one; it used to crash the process at that point
             await new Promise(resolve => setTimeout(resolve, 150));
         });
 
         it('rejects a large write when the PLC reports an error on one of its parts', async () => {
             plc.itemReturnCode = item => (item.byteOffset > 0 ? 0x05 : 0xff); // Address out of range on the second part
-            await assert.rejects(client.writeTags('DB1,S0.254', 'y'.repeat(230)), reason => reason === 'Invalid response');
+            await assert.rejects(client.writeTags('DB1,S0.254', 'y'.repeat(230)), isS7Error('PLC_ERROR', { plcCode: 0x05, message: /address out of range \(code 0x05\)/ }));
         });
     });
 

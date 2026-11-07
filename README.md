@@ -221,6 +221,34 @@ s7Client.initiateConnection();
 
 ```
 
+## Errors
+
+Reads and writes reject with an `S7Error`. Check its `code` instead of the message:
+
+```ts
+import { S7Error } from 'nodes7comm';
+
+try {
+    await s7Client.readTags('DB206,REAL132');
+} catch (err) {
+    if (err instanceof S7Error && err.code === 'PLC_ERROR') {
+        console.log(err.message); // The PLC rejected DB206,REAL132: address out of range (code 0x05)
+        console.log(err.plcCode, err.tag); // 5 'DB206,REAL132'
+    }
+}
+```
+
+| code | When |
+|-|-|
+| `PLC_ERROR` | The PLC answered with an error. `plcCode` is its return code: `0x0a` object does not exist (for example a DB that isn't in the PLC), `0x05` address out of range, `0x03` access not allowed... |
+| `TIMEOUT` | The PLC didn't answer within `requestTimeout` |
+| `INVALID_RESPONSE` | The PLC's answer couldn't be decoded |
+| `CONNECTION_LOST` | The connection dropped before the request was sent |
+| `DISCONNECTED` | `disconnect()` was called before the request was answered |
+| `NOT_CONNECTED` | The request was made while not connected |
+
+An invalid address, or a value that doesn't match its tag, rejects with a plain `Error` before anything is sent to the PLC.
+
 
 ## Supported address
 | Operand identifier | Data type | Examples |

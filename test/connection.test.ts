@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { FakePlc, connectClient, createClient, disposeClients, getClosedPort } from './helpers/fake-plc.ts';
+import { FakePlc, connectClient, createClient, disposeClients, getClosedPort, isS7Error } from './helpers/fake-plc.ts';
 
 describe('connection', () => {
     let plc: FakePlc;
@@ -141,20 +141,20 @@ describe('connection', () => {
         await timeout;
     });
 
-    it('rejects a read with "Timeout" and emits disconnected when the PLC stops answering', async () => {
+    it('rejects a read with a TIMEOUT S7Error and emits disconnected when the PLC stops answering', async () => {
         const client = await connectClient(plc, { requestTimeout: 100 });
         const disconnected = once(client, 'disconnected');
         plc.silent = true;
-        await assert.rejects(client.readTags('MB0'), reason => reason === 'Timeout');
+        await assert.rejects(client.readTags('MB0'), isS7Error('TIMEOUT', { tag: 'MB0', message: /No answer from the PLC for MB0 within 100 ms/ }));
         const [message] = await disconnected;
         assert.match(message, /Read timeout/);
     });
 
-    it('rejects a write with "Timeout" and emits disconnected when the PLC stops answering', async () => {
+    it('rejects a write with a TIMEOUT S7Error and emits disconnected when the PLC stops answering', async () => {
         const client = await connectClient(plc, { requestTimeout: 100 });
         const disconnected = once(client, 'disconnected');
         plc.silent = true;
-        await assert.rejects(client.writeTags('MB0', 1), reason => reason === 'Timeout');
+        await assert.rejects(client.writeTags('MB0', 1), isS7Error('TIMEOUT', { tag: 'MB0' }));
         const [message] = await disconnected;
         assert.match(message, /Write timeout/);
     });
