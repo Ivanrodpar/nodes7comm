@@ -4,7 +4,7 @@
 
 This library allows communication to S7-300/400/1200/1500 PLCs using the Siemens S7 Ethernet protocol.
 
-This library is based entirely from [nodeS7](https://github.com/plcpeople/nodeS7).
+This library is a TypeScript port of [nodeS7](https://github.com/plcpeople/nodeS7) with a promise-based API.
 
 ## Get Started
 * First you need to enable GET/PUT Access. Right click on PLC -> Properties -> Protection and security -> Connections mechanisms -> Check GET/PUT Access. 
