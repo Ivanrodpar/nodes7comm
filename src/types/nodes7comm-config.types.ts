@@ -14,5 +14,6 @@ export interface Nodes7CommConfig {
     connectionName?: string;
     optimize?: boolean;
     autoReconnect?: boolean;
+    reconnectDelay?: number; // Milliseconds to wait before retrying a failed connection attempt (default 2000)
     logLevel?: 'none' | 'error' | 'warn' | 'info';
 }

@@ -86,12 +86,23 @@ describe('connection', () => {
         });
         client.initiateConnection();
         await new Promise(resolve => setTimeout(resolve, 500));
-        assert.equal(errors, 1, `${errors} error events in 500 ms`); // Used to be thousands
+        assert.equal(errors, 1, `${errors} error events in 500 ms`); // Used to be thousands; the default delay is 2 s
+    });
+
+    it('retries every reconnectDelay milliseconds', async () => {
+        const client = createClient({ port: await getClosedPort(), autoReconnect: true, reconnectDelay: 100 });
+        let errors = 0;
+        client.on('error', () => {
+            errors += 1;
+        });
+        client.initiateConnection();
+        await new Promise(resolve => setTimeout(resolve, 550));
+        assert.ok(errors >= 4 && errors <= 7, `${errors} error events in 550 ms`); // The first attempt, then one every 100 ms
     });
 
     it('reports connection errors on stderr and keeps reconnecting when nobody listens for error', async () => {
         const port = await getClosedPort();
-        const client = createClient({ port, autoReconnect: true }); // No 'error' listener on purpose
+        const client = createClient({ port, autoReconnect: true, reconnectDelay: 300 }); // No 'error' listener on purpose
         const reported: string[] = [];
         const originalConsoleError = console.error;
         console.error = (message: string) => reported.push(message);
@@ -116,7 +127,7 @@ describe('connection', () => {
 
     it('connects once an unreachable PLC comes back', async () => {
         const port = await getClosedPort();
-        const client = createClient({ port, autoReconnect: true });
+        const client = createClient({ port, autoReconnect: true, reconnectDelay: 200 });
         client.on('error', () => undefined);
         const firstError = once(client, 'error');
         client.initiateConnection();

@@ -8,7 +8,9 @@ import type { NodeS7CommEvents, Nodes7CommConfig, S7ErrorCode, S7Value } from '.
 type Equals<A, B> = (<X>() => X extends A ? 1 : 2) extends <X>() => X extends B ? 1 : 2 ? true : false;
 const expectType = <T extends true>(): T | undefined => undefined;
 
-const config: Nodes7CommConfig = { host: '192.168.0.1', logLevel: 'info' };
+const config: Nodes7CommConfig = { host: '192.168.0.1', logLevel: 'info', reconnectDelay: 500 };
+// @ts-expect-error reconnectDelay is a number of milliseconds
+export const wrongDelay: Nodes7CommConfig = { host: '192.168.0.1', reconnectDelay: '2s' };
 const client = new NodeS7Comm(config);
 
 export async function reads(): Promise<void> {

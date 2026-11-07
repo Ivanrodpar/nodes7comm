@@ -74,7 +74,7 @@ export class NodeS7Comm extends EventEmitter {
     private readonly maxGap: number = 10; // This is the byte tolerance for optimize
     private readonly requestMaxParallel: number = 8; // Our expected parrallels jobs
     private readonly requestMaxPDU: number = 960; // Our expected bytes size that we can send to the PLC
-    private readonly reconnectDelay: number = 2000; // Milliseconds to wait before retrying a failed connection attempt
+    private reconnectDelay: number = 2000; // Milliseconds to wait before retrying a failed connection attempt
 
     private readReq = Buffer.alloc(1500);
     private writeReq = Buffer.alloc(1500);
@@ -169,6 +169,9 @@ export class NodeS7Comm extends EventEmitter {
         }
         if (typeof connectionConfig.requestTimeout === 'number') {
             this.requestTimeout = connectionConfig.requestTimeout;
+        }
+        if (typeof connectionConfig.reconnectDelay === 'number' && connectionConfig.reconnectDelay >= 0) {
+            this.reconnectDelay = connectionConfig.reconnectDelay;
         }
         if (typeof connectionConfig.connectionName === 'undefined') {
             this.connectionName = connectionConfig.host;

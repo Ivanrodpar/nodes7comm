@@ -74,6 +74,7 @@ s7Client.on('connect-timeout', () => {
 |connectionName|string |false| ```${host}``` | |
 |optimize|boolean |false| true | Enable optimization of packages sent to PLC |
 |autoReconnect|boolean |false| true | Auto connect after disconnect |
+|reconnectDelay|number |false| 2000 | Milliseconds to wait before retrying a failed connection attempt |
 |logLevel| 'none' <br> 'error' <br> 'warn' <br> 'info' | false | 'none' | Show logs in console|
 
 

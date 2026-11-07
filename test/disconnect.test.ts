@@ -77,16 +77,16 @@ describe('disconnect()', () => {
 
     it('cancels a reconnection that was already scheduled', async () => {
         const port = await getClosedPort();
-        const client = createClient({ port, autoReconnect: true });
+        const client = createClient({ port, autoReconnect: true, reconnectDelay: 200 });
         client.on('error', () => undefined);
         const failed = once(client, 'error');
         client.initiateConnection();
-        await failed; // A retry is now scheduled in 2 s
+        await failed; // A retry is now scheduled in 200 ms
         await client.disconnect();
 
         const revived = await FakePlc.start(port);
         try {
-            await sleep(2300);
+            await sleep(500);
             assert.equal(revived.connectionRequests.length, 0);
         } finally {
             await revived.stop();
