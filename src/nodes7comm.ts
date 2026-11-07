@@ -132,6 +132,16 @@ export class NodeS7Comm extends EventEmitter {
         }
     }
 
+    private emitError(error: Error): void {
+        // Connection errors are recoverable (autoReconnect keeps trying), so an app without an 'error' listener
+        // must not be ended by EventEmitter's unhandled 'error' exception. Like ioredis, report it on stderr instead.
+        if (this.listenerCount('error') > 0) {
+            this.emit('error', error);
+        } else {
+            console.error(`${new Date().toLocaleString()} [${this.connectionName}] Unhandled error event: ${error.message}`);
+        }
+    }
+
     private getTranslatedTag(tag: string): string {
         if (this.directionsTranslated[tag]) {
             return this.directionsTranslated[tag];
@@ -1747,7 +1757,7 @@ export class NodeS7Comm extends EventEmitter {
             this.initS7commListeners();
             this.emit('connected');
         } catch (err) {
-            this.emit('error', err as Error);
+            this.emitError(err as Error);
         }
     }
 

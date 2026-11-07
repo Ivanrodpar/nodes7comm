@@ -89,6 +89,31 @@ describe('connection', () => {
         assert.equal(errors, 1, `${errors} error events in 500 ms`); // Used to be thousands
     });
 
+    it('reports connection errors on stderr and keeps reconnecting when nobody listens for error', async () => {
+        const port = await getClosedPort();
+        const client = createClient({ port, autoReconnect: true }); // No 'error' listener on purpose
+        const reported: string[] = [];
+        const originalConsoleError = console.error;
+        console.error = (message: string) => reported.push(message);
+        try {
+            client.initiateConnection();
+            await new Promise(resolve => setTimeout(resolve, 100)); // Used to end the process right here
+            assert.equal(reported.length, 1);
+            assert.match(reported[0], /Unhandled error event: .*ECONNREFUSED/);
+
+            const revived = await FakePlc.start(port);
+            try {
+                await once(client, 'connected');
+                assert.deepEqual(await client.readTags('MB0'), { MB0: 0 });
+            } finally {
+                disposeClients();
+                await revived.stop();
+            }
+        } finally {
+            console.error = originalConsoleError;
+        }
+    });
+
     it('connects once an unreachable PLC comes back', async () => {
         const port = await getClosedPort();
         const client = createClient({ port, autoReconnect: true });

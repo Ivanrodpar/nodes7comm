@@ -41,7 +41,7 @@ const s7Client = new NodeS7Comm(options);
 s7Client.initiateConnection();
 
 s7Client.on('error', (err) => {
-	// Error events
+	// Connection errors. Without this listener they are written to stderr and the process keeps running
 });
 
 s7Client.on('disconnected', () => {
