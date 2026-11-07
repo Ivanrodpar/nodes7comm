@@ -2067,7 +2067,8 @@ export class NodeS7Comm extends EventEmitter {
                 });
                 this.parallelJobsNow += 1;
                 this.outputLog(this.readReq.slice(0, 19 + readPacketArray[i].requestList.length * 12), 3);
-                this.client.write(this.readReq.slice(0, 19 + readPacketArray[i].requestList.length * 12));
+                // Send a copy: Node keeps a reference until the bytes go out, and readReq is reused by the next packet
+                this.client.write(Buffer.from(this.readReq.subarray(0, 19 + readPacketArray[i].requestList.length * 12)));
             } else {
                 const timeHandler = (): void => {
                     this.packetTimeout('read', readPacketArray[i].seqNum);
@@ -2248,7 +2249,8 @@ export class NodeS7Comm extends EventEmitter {
                     reqTime: process.hrtime.bigint(),
                 });
                 this.parallelJobsNow += 1;
-                this.client.write(this.writeReq.slice(0, 19 + dataBufferPointer + writePacketArray[i].requestList.length * 12)); // was 31
+                // Send a copy: Node keeps a reference until the bytes go out, and writeReq is reused by the next packet
+                this.client.write(Buffer.from(this.writeReq.subarray(0, 19 + dataBufferPointer + writePacketArray[i].requestList.length * 12)));
                 this.outputLog('Sending write packet with sequence number ' + writePacketArray[i].seqNum, 3);
             } else {
                 const timeHandler = (): void => {

@@ -134,6 +134,45 @@ describe('request building', () => {
         });
     });
 
+    describe('when the socket cannot send right away', () => {
+        // Node keeps a reference to the buffer passed to socket.write until it is sent, it doesn't copy it.
+        // This holds every write and sends them later, like a slow link would.
+        const holdWrites = (client: object): (() => void) => {
+            const socket = (client as { client: { write: (chunk: Buffer) => boolean } }).client;
+            const write = socket.write.bind(socket);
+            const held: Buffer[] = [];
+            socket.write = chunk => {
+                held.push(chunk);
+                return false;
+            };
+            return () => {
+                socket.write = write;
+                held.forEach(chunk => write(chunk));
+            };
+        };
+
+        it('sends every read request intact', async () => {
+            const tags = Array.from({ length: 30 }, (_, i) => `DB${i + 1},INT0`); // Two packets, prepared in one go
+            tags.forEach((_, i) => plc.db(i + 1).writeInt16BE(i, 0));
+            const release = holdWrites(client);
+            const read = client.readTags(tags);
+            release();
+            assert.deepEqual(await read, Object.fromEntries(tags.map((tag, i) => [tag, i])));
+        });
+
+        it('sends every write request intact', async () => {
+            const tags = Array.from({ length: 30 }, (_, i) => `DB${i + 1},INT0`);
+            const release = holdWrites(client);
+            const write = client.writeTags(
+                tags,
+                tags.map((_, i) => i + 100),
+            );
+            release();
+            await write;
+            tags.forEach((_, i) => assert.equal(plc.db(i + 1).readInt16BE(0), i + 100));
+        });
+    });
+
     describe('TCP segmentation', () => {
         it('reads a response split across TCP segments, including its header', async () => {
             plc.responseChunkSize = 3;
