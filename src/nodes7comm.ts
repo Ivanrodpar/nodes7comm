@@ -897,8 +897,9 @@ export class NodeS7Comm extends EventEmitter {
             this.isoConnectionState = 'disconnected';
             this.emit('disconnected', 'Read timeout on sequence number ' + packetSeqNum);
             this.rejectAllRequestQueue();
-            if (typeof packetSeqNum !== 'undefined') {
-                this.readResponse(undefined, this.findReadIndexOfSeqNum(packetSeqNum) as number);
+            const index = typeof packetSeqNum !== 'undefined' ? this.findReadIndexOfSeqNum(packetSeqNum) : -1;
+            if (index >= 0) {
+                this.readResponse(undefined, index);
             }
             return;
         }
@@ -907,8 +908,9 @@ export class NodeS7Comm extends EventEmitter {
             this.isoConnectionState = 'disconnected';
             this.emit('disconnected', 'Write timeout on sequence number ' + packetSeqNum);
             this.rejectAllRequestQueue();
-            if (typeof packetSeqNum !== 'undefined') {
-                this.writeResponse(undefined, this.findWriteIndexOfSeqNum(packetSeqNum) as number);
+            const index = typeof packetSeqNum !== 'undefined' ? this.findWriteIndexOfSeqNum(packetSeqNum) : -1;
+            if (index >= 0) {
+                this.writeResponse(undefined, index);
             }
             return;
         }
@@ -1217,20 +1219,46 @@ export class NodeS7Comm extends EventEmitter {
         return readValue;
     }
 
-    private checkReadResponseParts(readRequestSequence: number): boolean {
-        // Check in array of sentReadPacketArray if we received all parts of the same sequence
-        const waitingReadPackets = this.sentReadPacketArray.filter(sentReadPacket => {
-            return sentReadPacket.readRequestSequence === readRequestSequence && !sentReadPacket.rcvd;
-        });
-        return !!waitingReadPackets.length;
+    private isReadSequenceReceived(readRequestSequence: number): boolean {
+        // True when every packet carrying a part of this sequence has been answered (or has timed out)
+        return this.sentReadPacketArray.every(sentReadPacket => sentReadPacket.rcvd || !sentReadPacket.requestList.some(block => block.readRequestSequence === readRequestSequence));
     }
 
-    private checkWriteResponseParts(writeRequestSequence: number): boolean {
-        // Check in array of sentWritePacketArray if we received all parts of the same sequence
-        const waitingWritePackets = this.sentWritePacketArray.filter(sentWritePacket => {
-            return sentWritePacket.writeRequestSequence === writeRequestSequence && !sentWritePacket.rcvd;
-        });
-        return !!waitingWritePackets.length;
+    private resolveReadBlock(block: ReadBlock, buffer: Buffer): void {
+        // The buffer starts at the offset of the first address of the block
+        for (const address of block.addresses) {
+            const offset = address.offset - block.addresses[0].offset;
+            const value = this.BufferToAddressValue(address, buffer.slice(offset, address.byteLength + offset));
+            this.outputLog(`Tag ${address.userName} has value: ${value}`, 3);
+
+            const result: { [key: string]: any } = {};
+            result[address.userName] = value;
+            (address.promiseResolve as (result: { [key: string]: any }) => void)(result);
+        }
+    }
+
+    private rejectReadBlock(block: ReadBlock, reason: string): void {
+        this.outputLog(`Error trying to read in ${block.addresses[0].userName}. Rejecting promise`, 3);
+        for (const address of block.addresses) {
+            (address.promiseReject as (reason: string) => void)(reason);
+        }
+    }
+
+    private isWriteSequenceReceived(writeRequestSequence: number): boolean {
+        // True when every packet carrying a part of this sequence has been answered (or has timed out)
+        return this.sentWritePacketArray.every(sentWritePacket => sentWritePacket.rcvd || !sentWritePacket.requestList.some(block => block.writeRequestSequence === writeRequestSequence));
+    }
+
+    private resolveWriteBlock(block: WriteBlock): void {
+        this.outputLog(block.itemReference.address.name + ' write completed succesfully', 3);
+        const result: { [key: string]: any } = {};
+        result[block.itemReference.address.userName] = block.itemReference.writeValue;
+        (block.itemReference.address.promiseResolve as (result: { [key: string]: any }) => void)(result);
+    }
+
+    private rejectWriteBlock(block: WriteBlock, reason: string): void {
+        this.outputLog(`Error trying to write in ${block.itemReference.address.name}. Rejecting promise`, 3);
+        (block.itemReference.address.promiseReject as (reason: string) => void)(reason);
     }
 
     private readResponse(data: Buffer | undefined, foundSeqIndex: number): void {
@@ -1267,80 +1295,39 @@ export class NodeS7Comm extends EventEmitter {
                 break;
             }
         }
-        let canDeletePackets: boolean = true;
-        // If the sentReadPacket have only one part, we can continue to check values
-        if (this.sentReadPacketArray[foundSeqIndex].requestList[0].parts === 1) {
-            for (let i = 0; i < this.sentReadPacketArray[foundSeqIndex].requestList.length; i++) {
-                if (typeof this.sentReadPacketArray[foundSeqIndex].requestList[i].responseBuffer !== 'undefined') {
-                    let offset = 0;
-                    const buffer: Buffer = (this.sentReadPacketArray[foundSeqIndex].requestList[i].responseBuffer as Buffer).slice(offset, this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].byteLength + offset);
-                    const value = this.BufferToAddressValue(this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0], buffer);
-                    this.outputLog(`Tag ${this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].userName} has value: ${value}`, 3);
-
-                    const result: { [key: string]: any } = {};
-                    result[this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].userName] = value;
-                    (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseResolve as any)(result);
-
-                    for (let u = 1; u < this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses.length; u++) {
-                        const pastOffset = this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u - 1].offset;
-                        const currentOffset = this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].offset;
-                        if (pastOffset !== currentOffset) {
-                            offset += this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].offset - this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u - 1].offset;
-                        }
-
-                        const buffer: Buffer = (this.sentReadPacketArray[foundSeqIndex].requestList[i].responseBuffer as Buffer).slice(offset, this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].byteLength + offset);
-                        const value = this.BufferToAddressValue(this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u], buffer);
-                        this.outputLog(`Tag ${this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].userName} has value: ${value}`, 3);
-
-                        const result: { [key: string]: any } = {};
-                        result[this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].userName] = value;
-                        (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[u].promiseResolve as (result: { [key: string]: any }) => void)(result);
-                    }
+        // A packet can mix single-part blocks with parts of blocks that were split across several packets
+        for (const block of this.sentReadPacketArray[foundSeqIndex].requestList) {
+            if (block.parts === 1) {
+                if (block.responseBuffer) {
+                    this.resolveReadBlock(block, block.responseBuffer);
                 } else {
-                    this.outputLog(`Error trying to read in ${this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].userName}. Rejecting promise`, 3);
-                    (this.sentReadPacketArray[foundSeqIndex].requestList[i].addresses[0].promiseReject as (reason: string) => void)('Timeout');
+                    this.rejectReadBlock(block, 'Timeout');
                 }
-            }
-        } else if (this.sentReadPacketArray[foundSeqIndex].requestList[0].parts > 1 && this.checkReadResponseParts(this.sentReadPacketArray[foundSeqIndex].readRequestSequence)) {
-            // If the sentReadPacket have two or more parts and are already received
-            let validResponse: boolean = true;
-            const buffer: Buffer = Buffer.alloc(this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].dataTypeLength);
-            const readRequestSequence = this.sentReadPacketArray[foundSeqIndex].requestList[0].readRequestSequence;
-            for (let i = 0; i < this.sentReadPacketArray.length; i++) {
-                if (this.sentReadPacketArray[i].readRequestSequence === readRequestSequence) {
-                    if (typeof this.sentReadPacketArray[i].requestList[0].responseBuffer !== 'undefined') {
-                        (this.sentReadPacketArray[i].requestList[0].responseBuffer as Buffer).copy(buffer, this.sentReadPacketArray[i].requestList[0].offset - this.sentReadPacketArray[i].requestList[0].addresses[0].offset);
+            } else if (this.isReadSequenceReceived(block.readRequestSequence)) {
+                // Every part has arrived: put them back together in a buffer that starts at the first address
+                const parts = this.sentReadPacketArray.flatMap(sentReadPacket => sentReadPacket.requestList.filter(part => part.readRequestSequence === block.readRequestSequence));
+                const start = block.addresses[0].offset;
+                const buffer = Buffer.alloc(Math.max(...parts.map(part => part.offset - start + part.totalbyteLength)));
+                let validResponse = true;
+                for (const part of parts) {
+                    if (part.responseBuffer) {
+                        part.responseBuffer.copy(buffer, part.offset - start);
                     } else {
                         validResponse = false;
                     }
                 }
-            }
-
-            if (validResponse) {
-                const value = this.BufferToAddressValue(this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0], buffer);
-                this.outputLog('Address ' + this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].userName + ' has value ' + value, 3);
-                const result: { [key: string]: any } = {};
-                result[this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].userName] = value;
-                (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseResolve as (result: { [key: string]: any }) => void)(result);
-            } else {
-                this.outputLog(`Error trying to read in ${this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.name}. Rejecting promise...`, 3);
-                if (data) {
-                    (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseReject as (reason: string) => void)('Invalid response');
+                if (validResponse) {
+                    this.resolveReadBlock(block, buffer);
                 } else {
-                    (this.sentReadPacketArray[foundSeqIndex].requestList[0].addresses[0].promiseReject as (reason: string) => void)('Timeout');
+                    this.rejectReadBlock(block, data ? 'Invalid response' : 'Timeout');
                 }
+            } else {
+                this.outputLog(`Wait for the other parts of read request with sequence ${block.readRequestSequence}`, 3);
             }
-        } else {
-            // we must wait until other parts comming for check
-            this.outputLog(`Wait for parts of read request with sequence ${this.sentWritePacketArray[foundSeqIndex].writeRequestSequence}`, 3);
-            canDeletePackets = false;
         }
 
-        if (canDeletePackets) {
-            this.sentReadPacketArray = this.sentReadPacketArray.filter((packet): boolean => {
-                return packet.readRequestSequence !== this.sentReadPacketArray[foundSeqIndex].readRequestSequence;
-            });
-        }
+        // Keep answered packets only while they hold parts of a block that is still waiting for other parts
+        this.sentReadPacketArray = this.sentReadPacketArray.filter(sentReadPacket => !sentReadPacket.rcvd || sentReadPacket.requestList.some(block => block.parts > 1 && !this.isReadSequenceReceived(block.readRequestSequence)));
 
         // If a response was whit timeout exceeded, the connectionState change to 'disconnected'
         if (this.isoConnectionState === 'disconnected') {
@@ -1375,54 +1362,29 @@ export class NodeS7Comm extends EventEmitter {
             }
         }
 
-        let canDeletePackets: boolean = true;
-
-        // If the sentWritePacket have only one part, we can continue to check values
-        if (this.sentWritePacketArray[foundSeqIndex].requestList[0].parts === 1) {
-            for (let i = 0; i < this.sentWritePacketArray[foundSeqIndex].requestList.length; i++) {
-                if (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.validResponseBuffer) {
-                    this.outputLog(this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.name + ' write completed succesfully', 3);
-                    const result: { [key: string]: any } = {};
-                    result[this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.userName] = this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.writeValue;
-                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseResolve as (result: { [key: string]: any }) => void)(result);
+        // A packet can mix single-part items with parts of items that were split across several packets
+        for (const block of this.sentWritePacketArray[foundSeqIndex].requestList) {
+            if (block.parts === 1) {
+                if (block.itemReference.validResponseBuffer) {
+                    this.resolveWriteBlock(block);
                 } else {
-                    this.outputLog(`Error trying to write in ${this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.name}. Rejecting promise`, 3);
-                    (this.sentWritePacketArray[foundSeqIndex].requestList[i].itemReference.address.promiseReject as (reason: string) => void)('Timeout');
+                    this.rejectWriteBlock(block, 'Timeout');
                 }
-            }
-        } else if (this.sentWritePacketArray[foundSeqIndex].requestList[0].parts > 1 && this.checkWriteResponseParts(this.sentWritePacketArray[foundSeqIndex].writeRequestSequence)) {
-            // If the sentWritePacket have two or more parts and are already received
-            let validResponse: boolean = true;
-            const writeRequestSequence: number = this.sentWritePacketArray[foundSeqIndex].requestList[0].writeRequestSequence;
-            for (let i = 0; i < this.sentWritePacketArray.length; i++) {
-                if (this.sentWritePacketArray[i].writeRequestSequence === writeRequestSequence) {
-                    validResponse = this.sentWritePacketArray[i].requestList[0].itemReference.validResponseBuffer;
+            } else if (this.isWriteSequenceReceived(block.writeRequestSequence)) {
+                // Every part has been answered: the write succeeded only if all of them did
+                const parts = this.sentWritePacketArray.flatMap(sentWritePacket => sentWritePacket.requestList.filter(part => part.writeRequestSequence === block.writeRequestSequence));
+                if (parts.every(part => part.itemReference.validResponseBuffer)) {
+                    this.resolveWriteBlock(block);
+                } else {
+                    this.rejectWriteBlock(block, data ? 'Invalid response' : 'Timeout');
                 }
-            }
-
-            if (validResponse) {
-                this.outputLog(this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.name + ' write completed succesfully', 3);
-                const result: { [key: string]: any } = {};
-                result[this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.userName] = this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.writeValue;
-                (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseResolve as (result: { [key: string]: any }) => void)(result);
             } else {
-                this.outputLog(`Error trying to write in ${this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.name}. Rejecting promise...`, 3);
-                if (data) {
-                    (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseReject as (reason: string) => void)('Invalid response');
-                } else {
-                    (this.sentWritePacketArray[foundSeqIndex].requestList[0].itemReference.address.promiseReject as (reason: string) => void)('Timeout');
-                }
+                this.outputLog(`Wait for the other parts of write request with sequence ${block.writeRequestSequence}`, 3);
             }
-        } else {
-            // we must wait until other parts comming for check
-            this.outputLog(`Wait for parts of write request with sequence ${this.sentWritePacketArray[foundSeqIndex].writeRequestSequence}`, 3);
-            canDeletePackets = false;
         }
-        if (canDeletePackets) {
-            this.sentWritePacketArray = this.sentWritePacketArray.filter((packet): boolean => {
-                return packet.writeRequestSequence !== this.sentWritePacketArray[foundSeqIndex].writeRequestSequence;
-            });
-        }
+
+        // Keep answered packets only while they hold parts of an item that is still waiting for other parts
+        this.sentWritePacketArray = this.sentWritePacketArray.filter(sentWritePacket => !sentWritePacket.rcvd || sentWritePacket.requestList.some(block => block.parts > 1 && !this.isWriteSequenceReceived(block.writeRequestSequence)));
 
         // If a response was whit timeout exceeded, the connectionState change to 'disconnected'
         if (this.isoConnectionState === 'disconnected') {
@@ -2052,7 +2014,7 @@ export class NodeS7Comm extends EventEmitter {
                 // Now we convert our value to a buffer
                 const writeBuffer = this.bufferizeValue(itemList[i].address, itemList[i].writeValue);
 
-                requestList[thisRequest].itemReference.writeBuffer = Buffer.from(writeBuffer.buffer, lengthOffset, lengthOffset + requestList[thisRequest].itemReference.address.byteLengthWithFill);
+                requestList[thisRequest].itemReference.writeBuffer = writeBuffer.subarray(lengthOffset, lengthOffset + requestList[thisRequest].itemReference.address.byteLengthWithFill);
 
                 lengthOffset += requestList[thisRequest].itemReference.address.byteLength;
 

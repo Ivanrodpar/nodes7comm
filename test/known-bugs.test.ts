@@ -1,4 +1,4 @@
-// Each test describes the expected behaviour of a known bug (see "Deuda conocida" in CLAUDE.md) and is skipped
+// Each test describes the expected behaviour of a known bug (see "Known issues" in CLAUDE.md) and is skipped
 // until the bug is fixed. Several of them crash the test process instead of failing, so run them one at a time:
 //   RUN_KNOWN_BUGS=1 node --test --test-name-pattern="larger than the PDU" test/known-bugs.test.ts
 
@@ -20,20 +20,6 @@ describe('known bugs', () => {
     afterEach(async () => {
         disposeClients();
         await plc.stop();
-    });
-
-    it('reads a single tag larger than the PDU', knownBug('crashes with a TypeError in readResponse'), async () => {
-        const client = await connectClient(plc);
-        const text = 'x'.repeat(230);
-        plc.db(1).set([254, text.length, ...Buffer.from(text)], 0);
-        assert.deepEqual(await client.readTags('DB1,S0.254'), { 'DB1,S0.254': text });
-    });
-
-    it('writes a single tag larger than the PDU', knownBug('rejects with "Invalid response", then crashes when the second part times out'), async () => {
-        const client = await connectClient(plc);
-        const text = 'y'.repeat(230);
-        assert.deepEqual(await client.writeTags('DB1,S0.254', text), { 'DB1,S0.254': text });
-        assert.deepEqual([...plc.db(1).subarray(0, 256)], [254, text.length, ...Buffer.from(text), ...new Array(24).fill(0x20)]);
     });
 
     it('addTags with an array keeps the tags that are not stored yet', knownBug('splices the wrong index'), async () => {

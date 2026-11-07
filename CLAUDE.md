@@ -26,6 +26,7 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 
 - The offsets and magic numbers (`dataPointer = 21`, the `readReqHeader`/`writeReqHeader`/`connectReq`/`negotiatePDU` headers, the fill bytes for odd lengths, `maxByteRequest = 4 * floor((maxPDU - 18) / 4)`) come from nodeS7 and the protocol. Don't "clean them up" without a test that covers the case.
 - Sequence numbers wrap after 32767.
+- A tag larger than `maxByteRequest` is split into several parts that share a `readRequestSequence`/`writeRequestSequence`, and one packet can mix parts of different tags. `readResponse` and `writeResponse` therefore handle each block of a packet separately, and keep answered packets until every part of their sequence has been answered (`isReadSequenceReceived` / `isWriteSequenceReceived`). Never assume `requestList[0]` describes the whole packet.
 - An S7-1200/300 usually negotiates a PDU of 240 (~220 usable bytes per item) and an S7-1500 one of 960. Test with both sizes.
 
 ## Tests
@@ -42,8 +43,6 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 
 Each bug has a test in `test/known-bugs.test.ts` that describes the correct behaviour and is skipped. To fix one: run its test with `RUN_KNOWN_BUGS=1` and `--test-name-pattern` (one at a time, because several crash the process), fix the code, remove the `knownBug(...)` from the test and delete the entry from this list.
 
-- Reading a single tag larger than `maxByteRequest` (for example `DB1,S0.254` with PDU 240) crashes the process with a `TypeError`, because `readResponse` uses `sentWritePacketArray` in the multi-part read branch. Also, `checkReadResponseParts`/`checkWriteResponseParts` return the inverted condition, and the reassembly buffer uses `dataTypeLength` instead of `byteLength`.
-- Writing a single tag larger than the PDU rejects with `'Invalid response'`. Then, when the second part's timeout fires, it crashes the process (`packetTimeout` → `writeResponse(undefined, -1)`).
 - `addTags([...])` with tags that are already stored calls `splice(index, 1)` with the index of the wrong array: it mutates the caller's array, duplicates tags and skips others.
 - `connectNow` doesn't `await` `onPDUReply`. An invalid PDU produces an unhandled rejection (which crashes the process), and `connected` is emitted anyway.
 - With `autoReconnect`, an `ECONNREFUSED` reconnects without any delay and produces thousands of `error` events per second.
