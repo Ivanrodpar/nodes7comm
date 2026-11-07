@@ -5,6 +5,7 @@
 - build: Removed ts-node and the manual `src/test/test.ts` script that ran against a real PLC; the automated suite replaces it.
 - fix: Reading a tag larger than the negotiated PDU (for example `DB1,S0.254` on an S7-1200) crashed the process. It is now split into several requests and reassembled, including the other tags read in the same call.
 - fix: Writing a tag larger than the negotiated PDU rejected with `'Invalid response'` and then crashed the process when the timeout of its second part fired. All parts are now written and the promise resolves once every part is acknowledged.
+- fix: A PLC response split across several TCP segments was treated as invalid, so the connection dropped and the request failed with `'Timeout'`. Incoming data is now buffered until each packet is complete.
 
 ## Breaking Changes
 

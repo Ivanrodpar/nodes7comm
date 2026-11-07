@@ -30,6 +30,7 @@ export class NodeS7Comm extends EventEmitter {
     private writeReq = Buffer.alloc(1500);
 
     private client!: Socket;
+    private receiveBuffer: Buffer = Buffer.alloc(0); // Bytes received from the PLC that don't form a complete packet yet
     private isoConnectionState: ConnectionState = 'disconnected';
     private maxPDU: number = 960;
     private maxParallel: number = 8;
@@ -952,6 +953,7 @@ export class NodeS7Comm extends EventEmitter {
         }
         clearTimeout(this.connectTimeout as NodeJS.Timeout);
         clearTimeout(this.PDUTimeout as NodeJS.Timeout);
+        this.receiveBuffer = Buffer.alloc(0);
     }
 
     private findReadIndexOfSeqNum(seqNum: number): number {
@@ -1413,16 +1415,8 @@ export class NodeS7Comm extends EventEmitter {
 
         const data = this.checkRfcData(theData);
         if (data === 'fastACK') {
-            //read again and wait for the requested data
+            // Older PLCs and WinAC acknowledge first; the data follows in its own packet
             this.outputLog('Fast Acknowledge received.', 3);
-            this.client.removeAllListeners('error');
-            this.client.removeAllListeners('data');
-            this.client.on('data', (data: Buffer): void => {
-                this.onResponse(data);
-            });
-            this.client.on('error', (): void => {
-                this.readWriteError(new Error('Error onisoclient, onReadResponse1'));
-            });
         } else if (data instanceof Buffer && data[7] === 0x32) {
             //check the validy of FA+S7 package
 
@@ -1436,15 +1430,6 @@ export class NodeS7Comm extends EventEmitter {
                 return;
             }
             // The smallest read packet will pass a length check of 25.  For a 1-item write response with no data, length will be 22.
-            if (data.length > data.readInt16BE(2)) {
-                this.outputLog('An oversize packet was detected.  Excess length is ' + (data.length - (data as Buffer).readInt16BE(2)) + '.', 2);
-                this.outputLog('We assume this is because two packets were sent at nearly the same time by the PLC.', 2);
-                this.outputLog('We are slicing the buffer and scheduling the second half for further processing next loop.', 2);
-                setTimeout((): void => {
-                    this.onResponse(data.slice(data.readInt16BE(2)));
-                }, 0); // This re-triggers this same function with the sliced-up buffer.
-            }
-
             if (data.length < data.readInt16BE(2) || data.readInt16BE(2) < 22 || data[5] !== 0xf0 || data[4] + 1 + 12 + 4 + data.readInt16BE(13) + data.readInt16BE(15) !== data.readInt16BE(2) || !(data[6] >> 7) || data[7] !== 0x32 || data[8] !== 3) {
                 this.outputLog('INVALID READ RESPONSE - DISCONNECTING', 1);
                 this.outputLog('TPKT Length From Header is ' + data.readInt16BE(2) + ' and RCV buffer length is ' + data.length + ' and COTP length is ' + (data as Buffer).readUInt8(4) + ' and data[6] is ' + data[6], 1);
@@ -1518,10 +1503,33 @@ export class NodeS7Comm extends EventEmitter {
         return ret;
     }
 
+    private onData(chunk: Buffer): void {
+        // TCP is a stream: a chunk can hold part of a packet or several packets.
+        // Accumulate the bytes and hand complete TPKT packets (length in bytes 2-3) to onResponse.
+        this.receiveBuffer = Buffer.concat([this.receiveBuffer, chunk]);
+        while (this.receiveBuffer.length >= 4) {
+            const packetLength = this.receiveBuffer.readUInt16BE(2);
+            if (this.receiveBuffer[0] !== 0x03 || packetLength < 7) {
+                this.outputLog('Invalid TPKT header received - disconnecting', 1);
+                this.outputLog(this.receiveBuffer, 3);
+                this.receiveBuffer = Buffer.alloc(0);
+                this.connectionReset();
+                return;
+            }
+            if (this.receiveBuffer.length < packetLength) {
+                return; // Wait for the rest of the packet
+            }
+            const packet = this.receiveBuffer.subarray(0, packetLength);
+            this.receiveBuffer = this.receiveBuffer.subarray(packetLength);
+            this.onResponse(packet);
+        }
+    }
+
     private initS7commListeners() {
         this.outputLog('S7comm connected', 3);
+        this.receiveBuffer = Buffer.alloc(0);
         this.client.on('data', (data: Buffer): void => {
-            this.onResponse(data);
+            this.onData(data);
         });
         this.client.on('error', (): void => {
             this.readWriteError(new Error('Error on client 2, onPDUReply function'));

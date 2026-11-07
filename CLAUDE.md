@@ -26,6 +26,7 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 
 - The offsets and magic numbers (`dataPointer = 21`, the `readReqHeader`/`writeReqHeader`/`connectReq`/`negotiatePDU` headers, the fill bytes for odd lengths, `maxByteRequest = 4 * floor((maxPDU - 18) / 4)`) come from nodeS7 and the protocol. Don't "clean them up" without a test that covers the case.
 - Sequence numbers wrap after 32767.
+- TCP is a stream: once connected, `onData` accumulates the bytes in `receiveBuffer` and passes `onResponse` exactly one complete TPKT packet at a time (length in bytes 2-3). The handshake replies (`initISOConnect`, `initPDUConnect`) still read a single `data` event; they are small and haven't caused problems, but they are not framed.
 - A tag larger than `maxByteRequest` is split into several parts that share a `readRequestSequence`/`writeRequestSequence`, and one packet can mix parts of different tags. `readResponse` and `writeResponse` therefore handle each block of a packet separately, and keep answered packets until every part of their sequence has been answered (`isReadSequenceReceived` / `isWriteSequenceReceived`). Never assume `requestList[0]` describes the whole packet.
 - An S7-1200/300 usually negotiates a PDU of 240 (~220 usable bytes per item) and an S7-1500 one of 960. Test with both sizes.
 
@@ -34,7 +35,7 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 - They use Node's built-in runner (`node:test` + `node:assert/strict`), with no dependencies.
 - They are written in TypeScript and Node runs them by stripping the types, so only erasable syntax is allowed: no `enum`, `namespace` or parameter properties; type imports use `import type`, and relative imports include the `.ts` extension. `tsc` doesn't check them yet (it only compiles `src/`).
 - They import the **compiled** `lib/` (`../lib/index.js`), so they test what gets published. That's why `npm test` builds first.
-- `test/helpers/fake-plc.ts` simulates a PLC: memory per area and DB (`plc.db(1)`, `plc.area(AREA.M)`), a log of what it receives (`plc.jobs`, `plc.connectionRequests`), and fault switches (`silent`, `responseDelay`, `splitResponses`, `itemReturnCode`, `invalidPduReply`, `ignoreConnectionRequests`, `pduSize`, `maxParallel`). It doesn't simulate timers or counters.
+- `test/helpers/fake-plc.ts` simulates a PLC: memory per area and DB (`plc.db(1)`, `plc.area(AREA.M)`), a log of what it receives (`plc.jobs`, `plc.connectionRequests`), and fault switches (`silent`, `responseDelay`, `responseChunkSize`, `fastAcknowledge`, `itemReturnCode`, `invalidPduReply`, `ignoreConnectionRequests`, `pduSize`, `maxParallel`). It doesn't simulate timers or counters.
 - Create clients with `connectClient`/`createClient` (`autoReconnect: false` by default) and call `disposeClients()` in `afterEach`. Until there is a public `disconnect()`, that helper closes the socket by reaching into the client's private state.
 - Await every client promise: an unhandled rejection crashes the test process.
 - The existing tests pin the **current** behaviour, including the odd parts (for example, that a timeout rejects with the string `'Timeout'`, or that `readAllTags()` with no tags resolves to `[]`). If a change breaks one of them, it is an API change: that's allowed because the next release is 3.0.0, but it must be intentional. Update the test and record it under `## Breaking Changes` in `Unreleased`.
@@ -46,7 +47,6 @@ Each bug has a test in `test/known-bugs.test.ts` that describes the correct beha
 - `addTags([...])` with tags that are already stored calls `splice(index, 1)` with the index of the wrong array: it mutates the caller's array, duplicates tags and skips others.
 - `connectNow` doesn't `await` `onPDUReply`. An invalid PDU produces an unhandled rejection (which crashes the process), and `connected` is emitted anyway.
 - With `autoReconnect`, an `ECONNREFUSED` reconnects without any delay and produces thousands of `error` events per second.
-- `onResponse` assumes each socket `data` event contains complete packets. If a response arrives split across two TCP segments, it disconnects and the request ends with `'Timeout'`.
 - `DB12,D40`, the form the README documents for DWord, rejects with `Unknown data type: D`. The README also shows DInt examples (`ID140`, `MD100`, `DB2,D100`) that are actually DWord or don't work; the correct forms are `IDI`/`MDI`/`DB2,DI100`.
 - `DB1,STRING0.10` (with `STRING` instead of `S`) computes a length of 0 bytes, sends nothing, and the promise never settles.
 - `writeTags('DB1,INT0.3', [-1, 0, 1])` (a single tag as a string with an array value) writes zeros. Only `writeTags(['DB1,INT0.3'], [[-1, 0, 1]])` works.

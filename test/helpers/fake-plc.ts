@@ -28,6 +28,7 @@ export interface S7Job {
 }
 
 const TPKT_COTP_LENGTH = 7;
+const FAST_ACKNOWLEDGE = Buffer.from([0x03, 0x00, 0x00, 0x07, 0x02, 0xf0, 0x00]); // COTP data packet without S7 payload
 
 export class FakePlc {
     readonly connectionRequests: { localTSAP: number; remoteTSAP: number }[] = [];
@@ -42,7 +43,8 @@ export class FakePlc {
     invalidPduReply = false; // Answer the PDU negotiation with a malformed packet
     silent = false; // Receive read/write jobs but never answer them
     responseDelay = 0; // Milliseconds to wait before answering each job
-    splitResponses = false; // Send each job response in two TCP writes
+    responseChunkSize = 0; // When > 0, send each job response in TCP segments of this many bytes
+    fastAcknowledge = false; // Send an empty COTP data packet before each job response, like older PLCs and WinAC
     itemReturnCode: (item: S7Item) => number = () => 0xff; // 0xff = success, 0x0a = object does not exist...
 
     inFlight = 0;
@@ -52,6 +54,8 @@ export class FakePlc {
     private readonly sockets = new Set<Socket>();
     private readonly timers = new Set<NodeJS.Timeout>();
     private readonly memory = new Map<string, Buffer>();
+    private readonly outgoing: { socket: Socket; chunk: Buffer }[] = [];
+    private draining = false;
 
     static async start(): Promise<FakePlc> {
         const plc = new FakePlc();
@@ -93,6 +97,7 @@ export class FakePlc {
         this.sockets.add(socket);
         socket.on('close', () => this.sockets.delete(socket));
         socket.on('error', () => undefined);
+        socket.setNoDelay(true); // Don't let Nagle merge the chunks that responseChunkSize splits
 
         // TCP is a stream: split it into TPKT packets using the length in bytes 2-3
         let pending = Buffer.alloc(0);
@@ -220,20 +225,38 @@ export class FakePlc {
     }
 
     private send(socket: Socket, packet: Buffer): void {
-        if (socket.destroyed) {
-            return;
+        const chunks: Buffer[] = this.fastAcknowledge ? [FAST_ACKNOWLEDGE] : [];
+        const size = this.responseChunkSize > 0 ? this.responseChunkSize : packet.length;
+        for (let i = 0; i < packet.length; i += size) {
+            chunks.push(packet.subarray(i, i + size));
         }
-        if (!this.splitResponses) {
-            socket.write(packet);
-            return;
-        }
-        const half = Math.floor(packet.length / 2);
-        socket.write(packet.subarray(0, half));
-        this.schedule(() => {
+        if (chunks.length === 1 && !this.draining) {
             if (!socket.destroyed) {
-                socket.write(packet.subarray(half));
+                socket.write(chunks[0]);
             }
-        }, 10);
+            return;
+        }
+        this.outgoing.push(...chunks.map(chunk => ({ socket, chunk })));
+        this.drain();
+    }
+
+    // Write queued chunks one at a time with a short pause, so they reach the client as separate TCP segments and in order
+    private drain(): void {
+        if (this.draining) {
+            return;
+        }
+        const next = this.outgoing.shift();
+        if (!next) {
+            return;
+        }
+        if (!next.socket.destroyed) {
+            next.socket.write(next.chunk);
+        }
+        this.draining = true;
+        this.schedule(() => {
+            this.draining = false;
+            this.drain();
+        }, 2);
     }
 
     private schedule(callback: () => void, ms: number): void {

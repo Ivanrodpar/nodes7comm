@@ -1,6 +1,6 @@
 // Each test describes the expected behaviour of a known bug (see "Known issues" in CLAUDE.md) and is skipped
 // until the bug is fixed. Several of them crash the test process instead of failing, so run them one at a time:
-//   RUN_KNOWN_BUGS=1 node --test --test-name-pattern="larger than the PDU" test/known-bugs.test.ts
+//   RUN_KNOWN_BUGS=1 node --test --test-name-pattern="PDU negotiation" test/known-bugs.test.ts
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -53,13 +53,6 @@ describe('known bugs', () => {
         client.initiateConnection();
         await sleep(500);
         assert.ok(errors < 10, `${errors} error events in 500 ms`);
-    });
-
-    it('reassembles a response split across TCP segments', knownBug('drops the connection and rejects after the request timeout'), async () => {
-        const client = await connectClient(plc, { requestTimeout: 300 });
-        plc.splitResponses = true;
-        plc.db(1).writeInt16BE(7, 0);
-        assert.deepEqual(await client.readTags('DB1,INT0'), { 'DB1,INT0': 7 });
     });
 
     it('accepts DB DWord addresses written as in the README (DB12,D40)', knownBug('rejects with "Unknown data type: D"'), async () => {

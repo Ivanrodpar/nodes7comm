@@ -88,4 +88,40 @@ describe('request building', () => {
         await client.writeTags('DB1,INT0', 7);
         assert.equal(plc.db(1).readInt16BE(0), 7);
     });
+
+    describe('TCP segmentation', () => {
+        it('reads a response split across TCP segments, including its header', async () => {
+            plc.responseChunkSize = 3;
+            plc.db(1).writeInt16BE(7, 0);
+            assert.deepEqual(await client.readTags('DB1,INT0'), { 'DB1,INT0': 7 });
+        });
+
+        it('writes when the response is split across TCP segments', async () => {
+            plc.responseChunkSize = 5;
+            assert.deepEqual(await client.writeTags('DB1,INT0', -3), { 'DB1,INT0': -3 });
+            assert.equal(plc.db(1).readInt16BE(0), -3);
+        });
+
+        it('reads several parallel responses that arrive in small segments', async () => {
+            plc.responseChunkSize = 7; // Splits each 23-byte response mid-header and mid-data
+            [11, 22, 33].forEach((value, i) => plc.db(i + 1).writeInt16BE(value, 0));
+            const results = await Promise.all([client.readTags('DB1,INT0'), client.readTags('DB2,INT0'), client.readTags('DB3,INT0')]);
+            assert.deepEqual(results, [{ 'DB1,INT0': 11 }, { 'DB2,INT0': 22 }, { 'DB3,INT0': 33 }]);
+        });
+
+        it('reads a tag larger than the PDU whose parts arrive in segments', async () => {
+            plc.responseChunkSize = 50;
+            const text = 'w'.repeat(240);
+            plc.db(1).set([254, text.length, ...Buffer.from(text)], 0);
+            assert.deepEqual(await client.readTags('DB1,S0.254'), { 'DB1,S0.254': text });
+        });
+
+        it('ignores the fast acknowledgement that some PLCs send before each response', async () => {
+            plc.fastAcknowledge = true;
+            plc.db(1).writeInt16BE(5, 0);
+            assert.deepEqual(await client.readTags('DB1,INT0'), { 'DB1,INT0': 5 });
+            assert.deepEqual(await client.writeTags('DB1,INT0', 6), { 'DB1,INT0': 6 });
+            assert.equal(plc.db(1).readInt16BE(0), 6);
+        });
+    });
 });
