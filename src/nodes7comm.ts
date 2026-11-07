@@ -2169,42 +2169,23 @@ export class NodeS7Comm extends EventEmitter {
     }
 
     public addTags(tags: string | string[]): void {
-        // Check if we have already the S7Address for the new tags. Ignore if we already have the S7Address.
-        if (Array.isArray(tags)) {
-            for (let i = tags.length - 1; i >= 0; i--) {
-                const index = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
-                    return storedAddress.name === this.getTranslatedTag(tags[i]);
-                });
-                if (index >= 0 || typeof this.getTranslatedTag(tags[i]) === 'undefined') {
-                    tags.splice(index, 1);
-                    this.outputLog(`Ignoring ${tags[i]} because it already exists`, 3);
-                }
+        // A tag is ignored when its S7 address is already stored, or repeated in the same call.
+        // Every new tag is parsed before any is stored, so an invalid tag leaves the stored list unchanged.
+        const newAddresses: Address[] = [];
+        for (const tag of Array.isArray(tags) ? tags : [tags]) {
+            if (typeof tag !== 'string') {
+                continue;
             }
-        } else if (typeof tags === 'string') {
-            const index = this.storedAdresses.findIndex((storedAddress: Address): boolean => {
-                return storedAddress.name === this.getTranslatedTag(tags);
-            });
-            if (index >= 0 || typeof this.getTranslatedTag(tags) === 'undefined') {
-                this.outputLog(`Ignoring ${tags} because it already exists`, 3);
-                return;
+            const s7Address = this.getTranslatedTag(tag);
+            const isStored = (address: Address): boolean => address.name === s7Address;
+            if (this.storedAdresses.some(isStored) || newAddresses.some(isStored)) {
+                this.outputLog(`Ignoring ${tag} because it already exists`, 3);
+                continue;
             }
+            newAddresses.push(this.stringToS7Addr('read', s7Address, tag));
+            this.outputLog(`Added Tag ${tag}`, 3);
         }
-
-        if (Array.isArray(tags)) {
-            for (let i = 0; i < tags.length; i++) {
-                this.outputLog(`Adding Tag ${tags[i]}`, 3);
-                if (typeof tags[i] === 'string') {
-                    const address = this.stringToS7Addr('read', this.getTranslatedTag(tags[i]), tags[i]);
-                    this.storedAdresses.push(address);
-                    this.outputLog(`Added Tag ${tags[i]}`, 3);
-                }
-            }
-        } else if (typeof tags === 'string') {
-            this.outputLog(`Adding Tag ${tags}`, 3);
-            const address = this.stringToS7Addr('read', this.getTranslatedTag(tags), tags);
-            this.storedAdresses.push(address);
-            this.outputLog(`Added Tag ${tags}`, 3);
-        }
+        this.storedAdresses.push(...newAddresses);
     }
 
     public removeTags(tags: string | string[]): void {
