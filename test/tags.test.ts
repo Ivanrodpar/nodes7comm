@@ -13,7 +13,7 @@ describe('tags', () => {
     });
 
     afterEach(async () => {
-        disposeClients();
+        await disposeClients();
         await plc.stop();
     });
 

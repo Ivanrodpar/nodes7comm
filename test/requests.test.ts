@@ -13,7 +13,7 @@ describe('request building', () => {
     });
 
     afterEach(async () => {
-        disposeClients();
+        await disposeClients();
         await plc.stop();
     });
 
@@ -68,7 +68,7 @@ describe('request building', () => {
             assert.equal(restricted.jobs.length, 6);
             assert.equal(restricted.maxInFlight, 2);
         } finally {
-            disposeClients();
+            await disposeClients();
             await restricted.stop();
         }
     });

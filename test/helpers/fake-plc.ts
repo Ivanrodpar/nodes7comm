@@ -69,6 +69,11 @@ export class FakePlc {
         return (this.server.address() as AddressInfo).port;
     }
 
+    // Number of TCP connections the PLC currently has open
+    get connectionCount(): number {
+        return this.sockets.size;
+    }
+
     async stop(): Promise<void> {
         for (const timer of this.timers) {
             clearTimeout(timer);
@@ -325,15 +330,10 @@ export async function connectClient(plc: FakePlc, config: Partial<Nodes7CommConf
     return client;
 }
 
-// NodeS7Comm has no public way to disconnect yet (see CLAUDE.md), so this reaches into its private state
-export function disposeClients(): void {
-    for (const client of openClients) {
-        const internals = client as unknown as { autoReconnect: boolean; client?: Socket; reconnectTimer?: NodeJS.Timeout };
-        internals.autoReconnect = false;
-        clearTimeout(internals.reconnectTimer);
-        internals.client?.destroy();
-    }
+export async function disposeClients(): Promise<void> {
+    const clients = [...openClients];
     openClients.clear();
+    await Promise.all(clients.map(client => client.disconnect()));
 }
 
 export async function getClosedPort(): Promise<number> {

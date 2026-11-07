@@ -26,6 +26,7 @@ npm install nodes7comm
 - [addTags](#addTags)
 - [readAllTags](#readAllTags)
 - [removeTags](#removeTags)
+- [disconnect](#disconnect)
 
 <a  name="initiateConnection">initiateConnecton</a>
 
@@ -203,6 +204,20 @@ s7Client.readAllTags().then((values) => {
     console.log(values); // { tagBool: false }
 });
 
+
+```
+
+<a name="disconnect">disconnect</a>
+
+```ts
+
+// Close the connection and stop reconnecting, even with autoReconnect.
+// Pending reads and writes reject right away with Error('Disconnected'),
+// and the promise resolves once the socket is closed.
+await s7Client.disconnect();
+
+// Safe to open a new connection now, even on PLCs with few free connections
+s7Client.initiateConnection();
 
 ```
 

@@ -45,7 +45,7 @@ describe('reading and writing', () => {
     });
 
     afterEach(async () => {
-        disposeClients();
+        await disposeClients();
         await plc.stop();
     });
 
@@ -178,7 +178,7 @@ describe('reading and writing', () => {
                 assert.deepEqual(await s1500Client.readTags('DB1,DI0.300'), { 'DB1,DI0.300': values });
                 assert.equal(s1500.jobs.length, 2);
             } finally {
-                disposeClients();
+                await disposeClients();
                 await s1500.stop();
             }
         });
@@ -228,7 +228,7 @@ describe('reading and writing', () => {
                 );
                 assert.equal(s1500.jobs.length, 2);
             } finally {
-                disposeClients();
+                await disposeClients();
                 await s1500.stop();
             }
         });

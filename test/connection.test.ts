@@ -11,7 +11,7 @@ describe('connection', () => {
     });
 
     afterEach(async () => {
-        disposeClients();
+        await disposeClients();
         await plc.stop();
     });
 
@@ -106,7 +106,7 @@ describe('connection', () => {
                 await once(client, 'connected');
                 assert.deepEqual(await client.readTags('MB0'), { MB0: 0 });
             } finally {
-                disposeClients();
+                await disposeClients();
                 await revived.stop();
             }
         } finally {
@@ -128,7 +128,7 @@ describe('connection', () => {
             assert.equal(revived.connectionRequests.length, 1);
             assert.deepEqual(await client.readTags('MB0'), { MB0: 0 });
         } finally {
-            disposeClients();
+            await disposeClients();
             await revived.stop();
         }
     });

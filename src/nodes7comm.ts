@@ -40,6 +40,9 @@ export class NodeS7Comm extends EventEmitter {
     private connectTimeout: NodeJS.Timeout | undefined; // setTimeout function
     private PDUTimeout: NodeJS.Timeout | undefined; // setTimeout function
     private reconnectTimer: NodeJS.Timeout | undefined; // setTimeout function
+    private disconnectRequested: boolean = false; // Set by disconnect(): blocks every reconnection until initiateConnection() is called again
+    private disconnecting: Promise<void> | undefined; // While disconnect() waits for the socket to close
+    private abortConnecting: ((reason: Error) => void) | undefined; // Rejects the connection step in progress (TCP, ISO or PDU); used by disconnect(). Calling it on a step that already settled does nothing
 
     private connectionName: string | undefined = undefined;
     private host: string;
@@ -933,6 +936,9 @@ export class NodeS7Comm extends EventEmitter {
 
     private scheduleReconnect(): void {
         // Wait before retrying, so an unreachable PLC doesn't turn into a tight loop of connection attempts
+        if (this.disconnectRequested) {
+            return;
+        }
         this.outputLog(`Reconnecting in ${this.reconnectDelay} ms`, 2);
         clearTimeout(this.reconnectTimer as NodeJS.Timeout);
         this.reconnectTimer = setTimeout((): void => {
@@ -1601,6 +1607,7 @@ export class NodeS7Comm extends EventEmitter {
 
     private async initPDUConnect(): Promise<Buffer> {
         return new Promise((resolve, reject) => {
+            this.abortConnecting = reject;
             const timeHandler = (): void => {
                 this.packetTimeout('PDU');
                 this.emit('connect-timeout');
@@ -1675,6 +1682,7 @@ export class NodeS7Comm extends EventEmitter {
         }
 
         return new Promise((resolve, reject) => {
+            this.abortConnecting = reject;
             const timeHandler = (): void => {
                 this.packetTimeout('ISO');
                 this.emit('connect-timeout');
@@ -1718,6 +1726,7 @@ export class NodeS7Comm extends EventEmitter {
 
         this.outputLog(`Attempting to connect to host ${this.host} on port ${this.port}`, 3);
         return new Promise((resolve, reject): void => {
+            this.abortConnecting = reject;
             this.client.setTimeout(this.connectionTimeout || 5000, (): void => {
                 this.connectError(new Error('Connection timeout'));
                 this.emit('connect-timeout');
@@ -1741,37 +1750,73 @@ export class NodeS7Comm extends EventEmitter {
         // prevents any reconnect timer to fire this again
         clearTimeout(this.reconnectTimer as NodeJS.Timeout);
 
-        // Don't re-trigger.
-        if (this.isoConnectionState !== 'disconnected') {
+        // Don't re-trigger, and never reconnect after disconnect()
+        if (this.isoConnectionState !== 'disconnected' || this.disconnectRequested) {
             return;
         }
 
         this.connectionCleanup();
 
         try {
+            // disconnect() can arrive while any of these steps is in progress: stop without emitting 'connected'
             await this.initTCPConnect();
+            if (this.disconnectRequested) {
+                return;
+            }
             const ISOResponse = await this.initISOConnect();
+            if (this.disconnectRequested) {
+                return;
+            }
             this.onISOConnectReply(ISOResponse);
             const PDUResponse = await this.initPDUConnect();
+            if (this.disconnectRequested) {
+                return;
+            }
             this.onPDUReply(PDUResponse);
             this.initS7commListeners();
             this.emit('connected');
         } catch (err) {
-            this.emitError(err as Error);
+            if (!this.disconnectRequested) {
+                this.emitError(err as Error);
+            }
         }
     }
 
     private sendNextRequest(): void {
+        // Sent right away: the new packet is appended to the sent arrays, so the response being processed keeps its index
         const request: RequestQueue = this.requestQueue.shift() as RequestQueue;
         if (request.action === 'read') {
-            setTimeout((): void => {
-                this.sendReadPacket([request.request as S7PreparedReadRequest]);
-            }, 0);
-        } else if (request.action === 'write') {
-            setTimeout((): void => {
-                this.sendWritePacket([request.request as S7PreparedWriteRequest]);
-            }, 0);
+            this.sendReadPacket([request.request as S7PreparedReadRequest]);
+        } else {
+            this.sendWritePacket([request.request as S7PreparedWriteRequest]);
         }
+    }
+
+    private rejectRequest(request: RequestQueue | SendReadRequest | SendWriteRequest, reason: Error): void {
+        // Reject every address of a queued or sent packet (the parts of a split tag share one promise; rejecting twice is harmless)
+        const reject = (address: Address): void => (address.promiseReject as unknown as (reason: Error) => void)(reason);
+        const packet = 'action' in request ? request.request : request;
+        for (const block of packet.requestList as (ReadBlock | WriteBlock)[]) {
+            if ('addresses' in block) {
+                block.addresses.forEach(reject);
+            } else {
+                reject(block.itemReference.address);
+            }
+        }
+    }
+
+    private rejectAllPending(reason: Error): void {
+        for (const request of this.requestQueue) {
+            this.rejectRequest(request, reason);
+        }
+        for (const packet of [...this.sentReadPacketArray, ...this.sentWritePacketArray]) {
+            clearTimeout(packet.timeout);
+            this.rejectRequest(packet, reason);
+        }
+        this.requestQueue = [];
+        this.sentReadPacketArray = [];
+        this.sentWritePacketArray = [];
+        this.parallelJobsNow = 0;
     }
 
     private prepareReadPacket(addresses: Address[]): S7PreparedReadRequest[] {
@@ -2167,7 +2212,54 @@ export class NodeS7Comm extends EventEmitter {
     }
 
     public initiateConnection(): void {
-        this.connectNow();
+        this.disconnectRequested = false;
+        if (this.disconnecting) {
+            // disconnect() is still closing the old socket: open the new connection once it's closed,
+            // so a PLC with few free connections doesn't refuse it (and connectionCleanup doesn't drop disconnect()'s listener)
+            this.disconnecting.then((): Promise<void> => this.connectNow());
+        } else {
+            this.connectNow();
+        }
+    }
+
+    /**
+     * Closes the connection and stops reconnecting, even with `autoReconnect`. Pending reads and writes reject
+     * right away with an `Error('Disconnected')`. Resolves once the socket is closed, so a new connection to a PLC
+     * with few free connections (like an S7-1200) can be opened safely afterwards. Calling it again does nothing.
+     * Call `initiateConnection()` to connect again.
+     */
+    public async disconnect(): Promise<void> {
+        const alreadyDisconnected = this.disconnectRequested;
+        this.disconnectRequested = true;
+        clearTimeout(this.reconnectTimer as NodeJS.Timeout);
+        clearTimeout(this.connectTimeout as NodeJS.Timeout);
+        clearTimeout(this.PDUTimeout as NodeJS.Timeout);
+        this.isoConnectionState = 'disconnected';
+        this.rejectAllPending(new Error('Disconnected'));
+        // If a connection step is in progress, end it now: its socket is about to be destroyed and it would never settle
+        this.abortConnecting?.(new Error('Disconnected'));
+        this.abortConnecting = undefined;
+
+        const socket = this.client as Socket | undefined;
+        if (socket && !socket.destroyed) {
+            this.disconnecting = new Promise<void>((resolve): void => {
+                socket.once('close', (): void => resolve());
+                socket.destroy();
+            });
+        }
+        // A second call made while the socket is still closing waits for the same close
+        const closing = this.disconnecting;
+        if (closing) {
+            await closing;
+            if (this.disconnecting === closing) {
+                this.disconnecting = undefined;
+            }
+        }
+
+        if (!alreadyDisconnected && socket) {
+            this.outputLog('Disconnected by disconnect()', 3);
+            this.emit('disconnected', 'Disconnected by disconnect()');
+        }
     }
 
     public addTranslationTags(variables: { [key: string]: string }): void {
