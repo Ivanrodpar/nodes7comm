@@ -20,12 +20,6 @@ describe('known bugs', () => {
         await plc.stop();
     });
 
-    it('accepts DB DWord addresses written as in the README (DB12,D40)', knownBug('rejects with "Unknown data type: D"'), async () => {
-        const client = await connectClient(plc);
-        plc.db(12).writeUInt32BE(0x12345678, 40);
-        assert.deepEqual(await client.readTags('DB12,D40'), { 'DB12,D40': 0x12345678 });
-    });
-
     it('accepts STRING as an alias of S', knownBug('computes a length of 0 bytes, sends no request and never settles'), async () => {
         const client = await connectClient(plc);
         plc.db(1).set([10, 2, ...Buffer.from('ok')], 0);

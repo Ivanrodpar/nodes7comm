@@ -11,6 +11,8 @@
 - fix: With `autoReconnect`, a failed connection attempt (for example a refused connection) was retried immediately, in a tight loop that emitted thousands of `error` events per second. Failed attempts are now retried after 2 seconds.
 - fix: `addTags()` with an array that included already stored tags removed the wrong elements from the caller's array, stored some tags twice and skipped others. It no longer modifies the array, ignores tags already stored or repeated in the same call, and stores nothing if one of the tags is invalid.
 - fix: `writeTags('DB1,INT0.3', [-1, 0, 1])` (a single tag with an array value) silently wrote zeros. The whole array is now written.
+- fix: `DB12,D40`, the DWord form documented in the README, rejected with `Unknown data type: D`. `D` now means DWord in data blocks too, as `ID`, `QD` and `MD` already did in the other areas.
+- docs: The README showed DWord addresses as DInt examples (`ID140`, `MD100`, `DB2,D100`); they are now `IDI140`, `MDI100` and `DB2,DI100`.
 - docs: The license now includes the copyright notice of nodeS7, which this library is ported from, as its MIT license requires.
 
 ## Breaking Changes

@@ -210,7 +210,7 @@ s7Client.readAllTags().then((values) => {
 ## Supported address
 | Operand identifier | Data type | Examples |
 |-|-|-|
-| Input (I) | Bool <br> Byte <br> Char <br> Word <br> Int <br> DWord <br> DInt <br> Real <br> LReal | I1.0 <br> IB3 <br> IC4 <br> IW22 <br> II24 <br> ID26 <br> ID140 <br> IR1400 <br> ILR1404 |
+| Input (I) | Bool <br> Byte <br> Char <br> Word <br> Int <br> DWord <br> DInt <br> Real <br> LReal | I1.0 <br> IB3 <br> IC4 <br> IW22 <br> II24 <br> ID26 <br> IDI140 <br> IR1400 <br> ILR1404 |
 | Output (Q) | Bool <br> Byte <br> Char <br> Word <br> Int <br> DWord <br> DInt <br> Real <br> LReal | Q0.2 <br> QB2 <br> QC4 <br> QW20 <br> QI22 <br> QD24 <br> QDI28 <br> QR32 <br> QLR36 |
-| Memory (M) | Bool <br> Byte <br> Char <br> Word <br> Int <br> DWord <br> DInt <br> Real <br> LReal | M2.2 <br> MB0 <br> MC2 <br> MW220 <br> MI28 <br> MD40 <br> MD100 <br> MR2000 <br> MLR2004 |
-| Data Block (DB) | Bool <br> Byte <br> Char <br> Word <br> Int <br> DWord <br> DInt <br> Real <br> LReal <br> String | DB5,X2.2 <br> DB6,B0 <br> DB10,C2 <br> DB10,W220 <br> DB10,I28 <br> DB12,D40 <br> DB2,D100 <br> DB100,R2 <br> DB101,LR6 <br> DB99,S0.50 |
+| Memory (M) | Bool <br> Byte <br> Char <br> Word <br> Int <br> DWord <br> DInt <br> Real <br> LReal | M2.2 <br> MB0 <br> MC2 <br> MW220 <br> MI28 <br> MD40 <br> MDI100 <br> MR2000 <br> MLR2004 |
+| Data Block (DB) | Bool <br> Byte <br> Char <br> Word <br> Int <br> DWord <br> DInt <br> Real <br> LReal <br> String | DB5,X2.2 <br> DB6,B0 <br> DB10,C2 <br> DB10,W220 <br> DB10,I28 <br> DB12,D40 <br> DB2,DI100 <br> DB100,R2 <br> DB101,LR6 <br> DB99,S0.50 |

@@ -451,7 +451,8 @@ export class NodeS7Comm extends EventEmitter {
         if (address.dataType === 'W') {
             address.dataType = 'WORD';
         }
-        if (address.dataType === 'DW') {
+        if (address.dataType === 'DW' || address.dataType === 'D') {
+            // DB12,D40 is a DWord, like ID26, QD24 and MD40 in the other areas
             address.dataType = 'DWORD';
         }
         if (address.dataType === 'R') {

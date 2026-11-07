@@ -22,6 +22,8 @@ const cases: { tag: string; value: unknown; area: number; db?: number; offset: n
     { tag: 'DB10,I28', value: -1234, area: AREA.DB, db: 10, offset: 28, bytes: [0xfb, 0x2e] },
     { tag: 'ID26', value: 0xdeadbeef, area: AREA.I, offset: 26, bytes: [0xde, 0xad, 0xbe, 0xef] },
     { tag: 'DB12,DW40', value: 0x12345678, area: AREA.DB, db: 12, offset: 40, bytes: [0x12, 0x34, 0x56, 0x78] },
+    { tag: 'DB12,D40', value: 0xfedcba98, area: AREA.DB, db: 12, offset: 40, bytes: [0xfe, 0xdc, 0xba, 0x98] },
+    { tag: 'IDI140', value: -2, area: AREA.I, offset: 140, bytes: [0xff, 0xff, 0xff, 0xfe] },
     { tag: 'MDI100', value: -100000, area: AREA.M, offset: 100, bytes: [0xff, 0xfe, 0x79, 0x60] },
     { tag: 'DB2,DI100', value: 2147483647, area: AREA.DB, db: 2, offset: 100, bytes: [0x7f, 0xff, 0xff, 0xff] },
     { tag: 'MR2000', value: 1.5, area: AREA.M, offset: 2000, bytes: [0x3f, 0xc0, 0x00, 0x00] },
