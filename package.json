@@ -15,9 +15,10 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('fs').rmSync('lib', { recursive: true, force: true })\" && tsc",
     "lint": "eslint .",
-    "test": "npm run build && tsc -p test/types && node --test --test-timeout=10000 \"test/**/*.test.ts\""
+    "test": "npm run build && tsc -p test/types && node --test --test-timeout=10000 \"test/**/*.test.ts\"",
+    "prepublishOnly": "npm run lint && npm test"
   },
   "files": [
     "lib"

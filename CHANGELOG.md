@@ -6,6 +6,7 @@
 - feat: Added `disconnect()`. It closes the connection and stops reconnecting, rejects pending reads and writes right away with an `S7Error` whose code is `DISCONNECTED`, emits `disconnected`, and resolves once the socket is closed. It's safe to call twice or while connecting, and `initiateConnection()` connects again afterwards.
 - test: Added an automated test suite that runs against a simulated S7 PLC (`npm test`).
 - build: Updated the development tooling to TypeScript 6, ESLint 10 and Prettier 3.
+- build: `npm publish` runs the linter and the whole test suite first (`prepublishOnly`), and `npm run build` starts from an empty `lib/`.
 - build: Removed ts-node and the manual `src/test/test.ts` script that ran against a real PLC; the automated suite replaces it.
 - fix: Reading a tag larger than the negotiated PDU (for example `DB1,S0.254` on an S7-1200) crashed the process. It is now split into several requests and reassembled, including the other tags read in the same call.
 - fix: Writing a tag larger than the negotiated PDU rejected with `'Invalid response'` and then crashed the process when the timeout of its second part fired. All parts are now written and the promise resolves once every part is acknowledged.

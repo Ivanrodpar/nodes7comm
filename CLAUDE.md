@@ -4,7 +4,7 @@ TypeScript library published on npm to communicate with Siemens S7-300/400/1200/
 
 ## Commands
 
-- `npm run build`: compiles `src/` → `lib/` with `tsc` (`lib/` is in `.gitignore`).
+- `npm run build`: deletes `lib/` and compiles `src/` → `lib/` with `tsc` (`lib/` is in `.gitignore`). Deleting first keeps files of removed sources out of the package.
 - `npx tsc --noEmit`: type-check.
 - `npm run lint`: ESLint 10 with flat config (`eslint.config.js`), typescript-eslint, and prettier as a rule. It checks the `.ts` files and the `.js` config files.
 - `npm test`: builds, type-checks the public API with `tsc -p test/types` (`test/types/api.ts`, checked against `lib/*.d.ts`, never run), and runs the `test/` suite with `node:test` against a simulated PLC. Takes about 4 s. Tests that wait for a reconnection pass a short `reconnectDelay`; only "waits before retrying when the connection is refused" keeps the 2 s default, to check it.
@@ -88,6 +88,6 @@ These change public behaviour, so each one must be recorded under `## Breaking C
 ## Publishing
 
 - `package.json` has `"files": ["lib"]`, so only `lib/`, README, LICENSE and package.json are published (neither this file nor `test/`).
-- There is no `prepublishOnly`: run `npm run build` before `npm publish`, or a stale `lib/` will be published.
+- `prepublishOnly` runs `npm run lint && npm test` (which rebuilds `lib/` from scratch), so `npm publish` stops if anything fails and never ships a stale `lib/`. `npm publish --dry-run` runs it too and shows the tarball without uploading.
 - `exports` only exposes the package root (`types` + `default`), and `engines` requires Node `^20.19.0 || >=22.12.0`. Both changes are already recorded in `Unreleased` as breaking.
 - Before publishing, test the tarball the way a consumer would: `npm pack`, install it in a temporary project, and check `import`, `require()` and type-checking with TypeScript.
