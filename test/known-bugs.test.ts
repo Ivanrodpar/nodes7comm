@@ -20,12 +20,6 @@ describe('known bugs', () => {
         await plc.stop();
     });
 
-    it('accepts STRING as an alias of S', knownBug('computes a length of 0 bytes, sends no request and never settles'), async () => {
-        const client = await connectClient(plc);
-        plc.db(1).set([10, 2, ...Buffer.from('ok')], 0);
-        assert.deepEqual(await client.readTags('DB1,STRING0.10'), { 'DB1,STRING0.10': 'ok' });
-    });
-
     it('writes DWORD arrays with values of 2^31 or more', knownBug('uses writeInt32BE for DWORD arrays and rejects with a RangeError'), async () => {
         const client = await connectClient(plc);
         await client.writeTags(['MD0.2'], [[0xdeadbeef, 1]]);

@@ -121,6 +121,15 @@ describe('reading and writing', () => {
             plc.db(1).set([4, 2, ...Buffer.from('ab'), ...spaces(2), 4, 3, ...Buffer.from('xyz'), ...spaces(1)], 0);
             assert.deepEqual(await client.readTags('DB1,S0.4.2'), { 'DB1,S0.4.2': ['ab', 'xyz'] });
         });
+
+        it('accepts STRING as an alias of S', async () => {
+            plc.db(1).set([10, 2, ...Buffer.from('ok')], 0);
+            assert.deepEqual(await client.readTags('DB1,STRING0.10'), { 'DB1,STRING0.10': 'ok' });
+            await client.writeTags('DB1,STRING20.10', 'hi');
+            assert.deepEqual([...plc.db(1).subarray(20, 24)], [10, 2, ...Buffer.from('hi')]);
+            plc.db(1).set([4, 1, ...Buffer.from('a'), ...spaces(3), 4, 2, ...Buffer.from('bc'), ...spaces(2)], 40);
+            assert.deepEqual(await client.readTags('DB1,STRING40.4.2'), { 'DB1,STRING40.4.2': ['a', 'bc'] });
+        });
     });
 
     describe('tags larger than the PDU', () => {
@@ -263,6 +272,11 @@ describe('reading and writing', () => {
 
         it('rejects DB bit offsets above 7', async () => {
             await assert.rejects(client.readTags('DB1,X0.8'), /Invalid bit offset/);
+        });
+
+        it('rejects a string without a length instead of never settling', async () => {
+            await assert.rejects(client.readTags('DB1,S0'), /Invalid length, check your tag: DB1,S0/);
+            assert.equal(plc.jobs.length, 0);
         });
 
         it('rejects tags that are not strings', async () => {

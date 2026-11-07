@@ -172,7 +172,7 @@ export class NodeS7Comm extends EventEmitter {
             address.dataType = splitString2[0].replace(/[0-9]/gi, '').toUpperCase(); // Clear the numbers
             if (address.dataType === 'X' && splitString2.length === 3) {
                 address.arrayLength = parseInt(splitString2[2], 10); // Array of bits
-            } else if (address.dataType !== 'X' && address.dataType !== 'S' && splitString2.length === 2) {
+            } else if (address.dataType !== 'X' && address.dataType !== 'S' && address.dataType !== 'STRING' && splitString2.length === 2) {
                 address.arrayLength = parseInt(splitString2[1], 10); // Bit
             } else if ((address.dataType === 'S' || address.dataType === 'STRING') && splitString2.length === 3) {
                 address.dataTypeLength = parseInt(splitString2[1], 10) + 2; // With strings, add 2 to the length due to S7 header
@@ -543,6 +543,11 @@ export class NodeS7Comm extends EventEmitter {
                 throw new Error(`Zero length arrays not allowed, check your tag: ${addr}`);
             }
             address.byteLength = address.arrayLength * address.dataTypeLength;
+        }
+        if (!(address.byteLength > 0)) {
+            // 0 or NaN (for example DB1,S0 without a length): no request would ever be sent and the promise would never settle
+            this.outputLog(`Invalid length, check your tag: ${addr}`, 1);
+            throw new Error(`Invalid length, check your tag: ${addr}`);
         }
 
         address.byteLengthWithFill = address.byteLength;
