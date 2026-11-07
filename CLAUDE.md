@@ -47,7 +47,6 @@ Each bug has a test in `test/known-bugs.test.ts` that describes the correct beha
 
 - `DB12,D40`, the form the README documents for DWord, rejects with `Unknown data type: D`. The README also shows DInt examples (`ID140`, `MD100`, `DB2,D100`) that are actually DWord or don't work; the correct forms are `IDI`/`MDI`/`DB2,DI100`.
 - `DB1,STRING0.10` (with `STRING` instead of `S`) computes a length of 0 bytes, sends nothing, and the promise never settles.
-- `writeTags('DB1,INT0.3', [-1, 0, 1])` (a single tag as a string with an array value) writes zeros. Only `writeTags(['DB1,INT0.3'], [[-1, 0, 1]])` works.
 - `bufferizeValue` uses `writeInt32BE` for DWORD arrays, so values ≥ 2^31 reject with a `RangeError`.
 - Unverified: in `S7AddrToBuffer`, the timer/counter branch compares `address.Type === 'TIMER'`, but `Type` is `'T'`/`'C'`, so that branch never runs.
 

@@ -2282,6 +2282,19 @@ export class NodeS7Comm extends EventEmitter {
         });
     }
 
+    private checkWriteValue(address: Address, value: any): string | undefined {
+        // Catch values that bufferizeValue would silently turn into zeros or garbage. CHAR arrays take a string.
+        const isCharArray = address.arrayLength > 1 && (address.dataType === 'C' || address.dataType === 'CHAR');
+        if (address.arrayLength > 1 && !isCharArray) {
+            if (!Array.isArray(value) || value.length !== address.arrayLength) {
+                return `${address.userName} expects an array of ${address.arrayLength} values`;
+            }
+        } else if (Array.isArray(value)) {
+            return `${address.userName} expects a single value, not an array`;
+        }
+        return undefined;
+    }
+
     public async writeTags(tags: string | string[], value: any | any[]): Promise<any> {
         if (this.isoConnectionState !== 's7comm') {
             this.outputLog('Unable to write when not connected.', 1);
@@ -2310,6 +2323,16 @@ export class NodeS7Comm extends EventEmitter {
             return Promise.reject(new Error('Invalid values provided'));
         }
 
+        // With a single tag, `value` is that tag's whole value (an array for array tags)
+        const values: any[] = Array.isArray(tags) ? value : [value];
+        for (let i = 0; i < addresses.length; i++) {
+            const problem = this.checkWriteValue(addresses[i], values[i]);
+            if (problem) {
+                this.outputLog(problem, 1);
+                return Promise.reject(new Error(problem));
+            }
+        }
+
         const instantWriteBlockList: S7ItemWrite[] = []; // Initialize the array
 
         // Create the promises for each Tags and we stored in the same address object
@@ -2321,7 +2344,7 @@ export class NodeS7Comm extends EventEmitter {
             });
             const s7ItemWrite = getEmptyS7ItemWrite();
             s7ItemWrite.address = address;
-            s7ItemWrite.writeValue = Array.isArray(value) ? value[index] : value;
+            s7ItemWrite.writeValue = values[index];
             instantWriteBlockList.push(s7ItemWrite);
             promises.push(promise);
         });

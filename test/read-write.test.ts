@@ -84,6 +84,27 @@ describe('reading and writing', () => {
             assert.deepEqual([...plc.db(1).subarray(0, 6)], [0xff, 0xff, 0x00, 0x00, 0x00, 0x01]);
         });
 
+        it('writes an array when the tag is passed as a string', async () => {
+            assert.deepEqual(await client.writeTags('DB1,INT0.3', [-1, 0, 1]), { 'DB1,INT0.3': [-1, 0, 1] });
+            assert.deepEqual([...plc.db(1).subarray(0, 6)], [0xff, 0xff, 0x00, 0x00, 0x00, 0x01]);
+        });
+
+        it('writes a CHAR array from a string', async () => {
+            await client.writeTags('DB1,C0.5', 'Hello');
+            assert.equal(plc.db(1).subarray(0, 5).toString(), 'Hello');
+        });
+
+        it('rejects, without writing, an array with the wrong number of values', async () => {
+            await assert.rejects(client.writeTags('DB1,INT0.3', [1, 2]), /DB1,INT0.3 expects an array of 3 values/);
+            await assert.rejects(client.writeTags(['DB1,INT0.3'], [7]), /DB1,INT0.3 expects an array of 3 values/);
+            assert.equal(plc.jobs.length, 0);
+        });
+
+        it('rejects, without writing, an array for a single-value tag', async () => {
+            await assert.rejects(client.writeTags('DB1,INT0', [5]), /DB1,INT0 expects a single value, not an array/);
+            assert.equal(plc.jobs.length, 0);
+        });
+
         it('reads a bit array that spans two bytes', async () => {
             plc.db(1).set([0b00000101, 0b00000010], 0);
             assert.deepEqual(await client.readTags('DB1,X0.0.10'), { 'DB1,X0.0.10': [true, false, true, false, false, false, false, false, false, true] });

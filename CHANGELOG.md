@@ -10,6 +10,7 @@
 - fix: When the PLC sent a fast acknowledgement before the PDU negotiation reply, `connected` was emitted before the negotiation finished and the first requests failed. The acknowledgement is now ignored and the client waits for the real reply.
 - fix: With `autoReconnect`, a failed connection attempt (for example a refused connection) was retried immediately, in a tight loop that emitted thousands of `error` events per second. Failed attempts are now retried after 2 seconds.
 - fix: `addTags()` with an array that included already stored tags removed the wrong elements from the caller's array, stored some tags twice and skipped others. It no longer modifies the array, ignores tags already stored or repeated in the same call, and stores nothing if one of the tags is invalid.
+- fix: `writeTags('DB1,INT0.3', [-1, 0, 1])` (a single tag with an array value) silently wrote zeros. The whole array is now written.
 - docs: The license now includes the copyright notice of nodeS7, which this library is ported from, as its MIT license requires.
 
 ## Breaking Changes
@@ -18,6 +19,7 @@
 - Requires Node.js `^20.19.0 || >=22.12.0` (declared in `engines`).
 - Added an `exports` map: only the package root can be imported. Deep imports such as `nodes7comm/lib/...` no longer work.
 - TypeScript users need TypeScript 5.0 or newer, or 5.8 or newer when importing from CommonJS files with `"module": "nodenext"`.
+- `writeTags` rejects values that don't match their tag, without writing anything: array tags need an array with exactly one value per element (CHAR arrays take a string), and single-value tags reject arrays. Before, those values were written as zeros or garbage, and `writeTags('MB0', [5])` wrote `5`.
 
 
 ### v2.0.0
