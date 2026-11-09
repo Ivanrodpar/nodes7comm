@@ -2303,7 +2303,7 @@ export class NodeS7Comm extends EventEmitter {
 
     /**
      * Closes the connection and stops reconnecting, even with `autoReconnect`. Pending reads and writes reject
-     * right away with an `Error('Disconnected')`. Resolves once the socket is closed, so a new connection to a PLC
+     * right away with an `S7Error` whose code is `DISCONNECTED`. Resolves once the socket is closed, so a new connection to a PLC
      * with few free connections (like an S7-1200) can be opened safely afterwards. Calling it again does nothing.
      * Call `connect()` to connect again.
      */

@@ -25,6 +25,7 @@
 - fix: A connection attempt that timed out (TCP, ISO or PDU step) emitted `connect-timeout` but never finished, leaving a pending promise behind on every retry. It now ends quietly after emitting `connect-timeout`. With `autoReconnect: false`, a timed-out ISO or PDU step also left its socket open, holding one of the PLC's connections; it is now closed.
 - fix: `readTags([])` (an empty list) rejected with an internal `TypeError`. It now resolves to `{}`, as `writeTags([], [])` already did.
 - docs: The license now includes the copyright notice of nodeS7, which this library is ported from, as its MIT license requires.
+- docs: The README lists the requirements (Node.js, ESM, TypeScript) and has a guide for migrating from 2.x.
 
 ## Breaking Changes
 

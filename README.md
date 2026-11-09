@@ -16,6 +16,14 @@ This library is a TypeScript port of [nodeS7](https://github.com/plcpeople/nodeS
 npm install nodes7comm
 ```
 
+## Requirements
+
+- Node.js `^20.19.0 || >=22.12.0`.
+- The package is ESM-only. CommonJS projects can still load it with `require('nodes7comm')`, which these Node.js versions support.
+- TypeScript users need TypeScript 5.0 or newer, or 5.8 or newer when importing from CommonJS files with `"module": "nodenext"`.
+
+Upgrading from 2.x? See [Migrating from 2.x](#migrating).
+
 ## Methods
 
 - [connect](#connect)
@@ -32,7 +40,7 @@ npm install nodes7comm
 
 ```ts
 
-import { NodeS7Comm, Nodes7CommConfig } from 'nodes7comm';
+import { NodeS7Comm, type Nodes7CommConfig } from 'nodes7comm';
 
 const options: Nodes7CommConfig = {
     host: '192.168.1.200',
@@ -45,8 +53,8 @@ s7Client.on('error', (err) => {
 	// Connection errors. Without this listener they are written to stderr and the process keeps running
 });
 
-s7Client.on('disconnected', () => {
-	// When we are reading or writing and a timeout ocurred
+s7Client.on('disconnected', (reason) => {
+	// When a read or write times out, and when disconnect() is called
 });
 
 s7Client.on('connected', () => {
@@ -213,7 +221,7 @@ s7Client.readAllTags().then((values) => {
 ```ts
 
 // Close the connection and stop reconnecting, even with autoReconnect.
-// Pending reads and writes reject right away with Error('Disconnected'),
+// Pending reads and writes reject right away with an S7Error whose code is 'DISCONNECTED',
 // and the promise resolves once the socket is closed.
 await s7Client.disconnect();
 
@@ -261,6 +269,19 @@ try {
 | `NOT_CONNECTED` | The request was made while not connected |
 
 An invalid address, or a value that doesn't match its tag, rejects with a plain `Error` before anything is sent to the PLC.
+
+<a name="migrating"></a>
+## Migrating from 2.x
+
+- **Requirements:** Node.js `^20.19.0 || >=22.12.0`, and TypeScript 5.0 or newer for TypeScript users (see [Requirements](#requirements)). The package is ESM-only now; `require('nodes7comm')` keeps working.
+- **Imports:** only the package root can be imported. Deep imports such as `nodes7comm/lib/...` no longer work.
+- **`initiateConnection()` is now `connect()`.** It works the same way.
+- **Errors:** reads and writes reject with an [`S7Error`](#errors) instead of a string. Replace checks such as `err === 'Timeout'` with `err.code === 'TIMEOUT'`. Errors answered by the PLC (a missing DB, an address out of range...) used to reject with `'Timeout'` too; they are now `PLC_ERROR`, with the PLC's return code in `plcCode`.
+- **`writeTags` validates values** and rejects without writing anything when a value doesn't match its tag: array tags need an array with exactly one value per element (CHAR arrays take a string), and single-value tags reject arrays. In 2.x those values were written as zeros or garbage.
+- **`readAllTags()`** with no stored tags resolves to `{}` instead of `[]`.
+- **TypeScript:** `readTags`, `readAllTags` and `writeTags` no longer return `Promise<any>`. Code that used the values as a specific type needs `readTags<number>(...)` or a check (see [TypeScript](#typescript)). `writeTags` with several tags requires an array with one value each.
+
+New in 3.0.0: [`disconnect()`](#disconnect), the `reconnectDelay` option, and many fixes (tags larger than the PDU, responses split across TCP segments, reconnection loops...). The full list is in the [CHANGELOG](CHANGELOG.md).
 
 
 ## Supported address
