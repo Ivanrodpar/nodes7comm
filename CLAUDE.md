@@ -46,17 +46,20 @@ Everything lives in a single class, `NodeS7Comm` (`src/nodes7comm.ts`, ~2400 lin
 - Create clients with `connectClient`/`createClient` (`autoReconnect: false` by default) and `await disposeClients()` in `afterEach`; it calls `disconnect()` on every client. If a test expects a promise to reject during `disconnect()`, attach `assert.rejects(...)` before disconnecting, or Node reports an unhandled rejection.
 - Await every client promise: an unhandled rejection crashes the test process.
 - Check rejections with `assert.rejects(promise, isS7Error('PLC_ERROR', { plcCode: 0x05, tag: 'DB1,INT0', message: /.../ }))` (from `fake-plc.ts`); every property besides the code is optional.
-- The existing tests pin the **current** behaviour, including the odd parts. If a change breaks one of them, it is an API change: that's allowed because the next release is 3.0.0, but it must be intentional. Update the test and record it under `## Breaking Changes` in `Unreleased`.
+- The existing tests pin the **current** behaviour, including the odd parts. If a change breaks one of them, it is an API change. Since 3.0.0 is out, that means a new major version (see Conventions): don't make one without the author's approval. If approved, update the test and record it under `## Breaking Changes` in `Unreleased`.
 
-## Known issues (updated on 2026-11-06)
+## Known issues (updated on 2026-11-09)
 
-The ten bugs found on 2026-10-31 are fixed (see `Unreleased` in the CHANGELOG). When a new bug is found, add a test to `test/known-bugs.test.ts` that describes the correct behaviour and pass it `knownBug('what happens instead')` so it's skipped, then list the bug here. To fix one: run its test with `RUN_KNOWN_BUGS=1` and `--test-name-pattern` (one at a time, a bug can crash the process), fix the code, move the test to the file that covers that area without `knownBug(...)`, and delete the entry from this list.
+The ten bugs found on 2026-10-31 are fixed (see `v3.0.0` in the CHANGELOG). When a new bug is found, add a test to `test/known-bugs.test.ts` that describes the correct behaviour and pass it `knownBug('what happens instead')` so it's skipped, then list the bug here. To fix one: run its test with `RUN_KNOWN_BUGS=1` and `--test-name-pattern` (one at a time, a bug can crash the process), fix the code, move the test to the file that covers that area without `knownBug(...)`, and delete the entry from this list.
 
 - Unverified (the fake PLC doesn't simulate them, so it needs real hardware): in `S7AddrToBuffer`, the timer/counter branch compares `address.Type === 'TIMER'`, but `Type` is `'T'`/`'C'`, so that branch never runs and timers/counters are requested like plain bytes.
+- Undecided whether it's a bug: `disconnected` is only emitted when a read or write times out and on `disconnect()`, not when the PLC closes the socket.
 
-## Planned for 3.0.0 (API changes)
+## API decisions
 
-These change public behaviour, so each one must be recorded under `## Breaking Changes` (or as a `feat:`) in `Unreleased` when it's done. Done so far: unhandled `error` events (see `emitError` under Protocol caveats), `disconnect()`, `S7Error` rejections (see Protocol caveats), reads with no tags resolving to `{}` (`readAllTags()` used to return `[]`), typed results (`S7Value`, `Record<tag, S7Value>`), the `reconnectDelay` option, and renaming `initiateConnection()` to `connect()`. Nothing else is planned.
+3.0.0 (published on 2026-11-09) changed the public API: unhandled `error` events (see `emitError` under Protocol caveats), `disconnect()`, `S7Error` rejections (see Protocol caveats), reads with no tags resolving to `{}` (`readAllTags()` used to return `[]`), typed results (`S7Value`, `Record<tag, S7Value>`), the `reconnectDelay` option, and `initiateConnection()` renamed to `connect()`. The README's "Migrating from 2.x" section explains them to users. Nothing else is planned.
+
+- `connect()` returns `void`, not a promise, on purpose: with `autoReconnect` and an unreachable PLC, a promise would either never settle or reject on the first failed attempt, and a rejection would crash every caller that calls `connect()` without `await`/`catch`, which is how the event-based API is used. Readiness is signalled by the `connected` event.
 
 ## Tooling (updated on 2026-10-31)
 
@@ -82,12 +85,14 @@ These change public behaviour, so each one must be recorded under `## Breaking C
 - `.prettierrc.js` and `eslint.config.js` are exact copies of the configuration used in the author's other projects. Keep them identical to that source: don't tweak them just for this repo without asking.
 - Conventional Commits (`fix:`, `feat:`, `docs:`, `build:`, `test:`, `style:`, `release:`).
 - Work happens on `dev` and is merged into `master`.
-- `CHANGELOG.md` is maintained by hand. Each change goes in the `### Unreleased` section (at the top) in the same commit that introduces it, prefixed with its type (`fix:`, `feat:`...). Breaking changes go under its `## Breaking Changes`. On release, `Unreleased` is renamed to the version.
-- The next release will be **3.0.0**: there will be no more 2.x releases. Breaking changes to the public API are allowed if they are intentional, and each one is recorded under `## Breaking Changes` in `Unreleased`, because v3 will need a migration guide. The public API is the methods `connect`, `disconnect`, `readTags`, `writeTags`, `addTags`, `removeTags`, `readAllTags`, `addTranslationTags` and `deleteTranslationTag`, and the events `connected`, `connect-timeout`, `disconnected` and `error`.
+- `CHANGELOG.md` is maintained by hand. Each change goes in the `### Unreleased` section at the top (create it above the latest version if it isn't there) in the same commit that introduces it, prefixed with its type (`fix:`, `feat:`...). Breaking changes go under its `## Breaking Changes`. On release, `Unreleased` is renamed to the version.
+- Versions follow semver: `fix:` → patch, `feat:` → minor, a breaking change → major. 3.0.0 is the current release; breaking changes now need the author's approval and a migration note in the README, like "Migrating from 2.x". The public API is the methods `connect`, `disconnect`, `readTags`, `writeTags`, `addTags`, `removeTags`, `readAllTags`, `addTranslationTags` and `deleteTranslationTag`, and the events `connected`, `connect-timeout`, `disconnected` and `error`.
 
 ## Publishing
 
 - `package.json` has `"files": ["lib"]`, so only `lib/`, README, LICENSE and package.json are published (neither this file nor `test/`).
 - `prepublishOnly` runs `npm run lint && npm test` (which rebuilds `lib/` from scratch), so `npm publish` stops if anything fails and never ships a stale `lib/`. `npm publish --dry-run` runs it too and shows the tarball without uploading.
-- `exports` only exposes the package root (`types` + `default`), and `engines` requires Node `^20.19.0 || >=22.12.0`. Both changes are already recorded in `Unreleased` as breaking.
+- `exports` only exposes the package root (`types` + `default`), and `engines` requires Node `^20.19.0 || >=22.12.0`. Both arrived in 3.0.0.
 - Before publishing, test the tarball the way a consumer would: `npm pack`, install it in a temporary project, and check `import`, `require()` and type-checking with TypeScript.
+- Release steps (as done for 3.0.0): on `dev`, `npm version X.Y.Z --no-git-tag-version`, rename `### Unreleased` to `### vX.Y.Z`, commit `release: X.Y.Z`; merge `dev` into `master`, `git tag vX.Y.Z`, `git push origin master dev --tags`; then `npm publish`. The author commits and publishes; give them the commands.
+- The npm account has 2FA: `npm publish` gets a 401, prints an `Authenticate your account at:` link and waits for approval in the browser. Keep the terminal open until it finishes; if it's cancelled, nothing is uploaded. `npm publish --otp=<code>` also works.
