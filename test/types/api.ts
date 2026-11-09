@@ -86,3 +86,9 @@ export async function errors(): Promise<void> {
     }
     await client.disconnect();
 }
+
+export function connection(): void {
+    expectType<Equals<ReturnType<typeof client.connect>, void>>();
+    // @ts-expect-error renamed to connect() in 3.0.0
+    client.initiateConnection();
+}

@@ -335,7 +335,7 @@ export function createClient(config: Partial<Nodes7CommConfig> = {}): NodeS7Comm
 export async function connectClient(plc: FakePlc, config: Partial<Nodes7CommConfig> = {}): Promise<NodeS7Comm> {
     const client = createClient({ port: plc.port, ...config });
     const connected = once(client, 'connected');
-    client.initiateConnection();
+    client.connect();
     await connected;
     return client;
 }

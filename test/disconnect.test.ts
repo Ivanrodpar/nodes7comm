@@ -80,7 +80,7 @@ describe('disconnect()', () => {
         const client = createClient({ port, autoReconnect: true, reconnectDelay: 200 });
         client.on('error', () => undefined);
         const failed = once(client, 'error');
-        client.initiateConnection();
+        client.connect();
         await failed; // A retry is now scheduled in 200 ms
         await client.disconnect();
 
@@ -99,7 +99,7 @@ describe('disconnect()', () => {
         const events: string[] = [];
         client.on('connected', () => events.push('connected'));
         client.on('connect-timeout', () => events.push('connect-timeout'));
-        client.initiateConnection();
+        client.connect();
         await sleep(30);
         await client.disconnect();
         await sleep(150); // The ISO timeout (100 ms) would have fired by now
@@ -121,29 +121,29 @@ describe('disconnect()', () => {
                 // Stall the PDU negotiation: the PLC confirms ISO but never answers the setup request
                 (plc as unknown as { onSetupCommunication: () => void }).onSetupCommunication = () => undefined;
             }
-            client.initiateConnection();
+            client.connect();
             await sleep(50);
             await client.disconnect();
             assert.equal(await settlesWithin(capture.attempt(), 500), true);
         });
     }
 
-    it('can connect again with initiateConnection()', async () => {
+    it('can connect again with connect()', async () => {
         const client = await connectClient(plc);
         await client.disconnect();
         const reconnected = once(client, 'connected');
-        client.initiateConnection();
+        client.connect();
         await reconnected;
         plc.db(1).writeInt16BE(42, 0);
         assert.deepEqual(await client.readTags('DB1,INT0'), { 'DB1,INT0': 42 });
     });
 
-    it('connects again when initiateConnection() is called without awaiting disconnect()', async () => {
+    it('connects again when connect() is called without awaiting disconnect()', async () => {
         const client = await connectClient(plc);
         let closed = false;
         const closing = client.disconnect().then(() => (closed = true));
         const reconnected = once(client, 'connected');
-        client.initiateConnection();
+        client.connect();
         await reconnected;
         assert.equal(closed, true); // The old socket closed before the new connection was opened
         await closing;

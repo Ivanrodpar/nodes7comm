@@ -46,7 +46,7 @@ describe('connection', () => {
     it('emits error when the TCP connection is refused', async () => {
         const client = createClient({ port: await getClosedPort() });
         const error = once(client, 'error');
-        client.initiateConnection();
+        client.connect();
         const [err] = await error;
         assert.match(err.message, /ECONNREFUSED/);
     });
@@ -59,7 +59,7 @@ describe('connection', () => {
             connected = true;
         });
         const error = once(client, 'error');
-        client.initiateConnection();
+        client.connect();
         const [err] = await error;
         assert.ok(err instanceof Error);
         assert.match(err.message, /Invalid response on PDU reply/);
@@ -84,7 +84,7 @@ describe('connection', () => {
         client.on('error', () => {
             errors += 1;
         });
-        client.initiateConnection();
+        client.connect();
         await new Promise(resolve => setTimeout(resolve, 500));
         assert.equal(errors, 1, `${errors} error events in 500 ms`); // Used to be thousands; the default delay is 2 s
     });
@@ -95,7 +95,7 @@ describe('connection', () => {
         client.on('error', () => {
             errors += 1;
         });
-        client.initiateConnection();
+        client.connect();
         await new Promise(resolve => setTimeout(resolve, 550));
         assert.ok(errors >= 4 && errors <= 7, `${errors} error events in 550 ms`); // The first attempt, then one every 100 ms
     });
@@ -107,7 +107,7 @@ describe('connection', () => {
         const originalConsoleError = console.error;
         console.error = (message: string) => reported.push(message);
         try {
-            client.initiateConnection();
+            client.connect();
             await new Promise(resolve => setTimeout(resolve, 100)); // Used to end the process right here
             assert.equal(reported.length, 1);
             assert.match(reported[0], /Unhandled error event: .*ECONNREFUSED/);
@@ -130,7 +130,7 @@ describe('connection', () => {
         const client = createClient({ port, autoReconnect: true, reconnectDelay: 200 });
         client.on('error', () => undefined);
         const firstError = once(client, 'error');
-        client.initiateConnection();
+        client.connect();
         await firstError;
 
         const revived = await FakePlc.start(port); // The PLC comes up while the client waits to retry
@@ -148,7 +148,7 @@ describe('connection', () => {
         plc.ignoreConnectionRequests = true;
         const client = createClient({ port: plc.port, requestTimeout: 100 }); // The ISO step uses requestTimeout, not connectionTimeout
         const timeout = once(client, 'connect-timeout');
-        client.initiateConnection();
+        client.connect();
         await timeout;
     });
 
@@ -174,7 +174,7 @@ describe('connection', () => {
                 client.on('connect-timeout', () => events.push('connect-timeout'));
                 client.on('error', () => events.push('error'));
                 const capture = captureConnectAttempt(client);
-                client.initiateConnection();
+                client.connect();
                 assert.equal(await settlesWithin(capture.attempt(), 1500), true);
                 if (step === 'TCP' && events.includes('error')) {
                     return; // Some networks refuse 10.255.255.1 right away instead of letting it time out
@@ -187,7 +187,7 @@ describe('connection', () => {
             plc.ignoreConnectionRequests = true;
             const client = createClient({ port: plc.port, requestTimeout: 100 });
             const timeout = once(client, 'connect-timeout');
-            client.initiateConnection();
+            client.connect();
             await timeout;
             await new Promise(resolve => setTimeout(resolve, 50));
             assert.equal(plc.connectionCount, 0); // It used to stay open, holding one of the PLC's connections

@@ -3,7 +3,7 @@
 - feat: Added the `reconnectDelay` option: milliseconds to wait before retrying a failed connection attempt (default 2000).
 - feat: Typed results. `readTags` resolves to `Record<tag, S7Value>` with the keys taken from its arguments, and accepts the value type when you know it: `readTags<number>('DB1,INT0')`. `readAllTags` and `writeTags` are typed too, and `once`, `off`, `addListener`, `removeListener` and the `prepend*` methods know the event names and listener signatures, like `on` already did. `S7Value` and `NodeS7CommEvents` are exported.
 - feat: Added `S7Error`, exported with its `S7ErrorCode` type. Reads and writes now reject with it, and its `code` says what happened: `PLC_ERROR` (with the PLC's return code in `plcCode`), `TIMEOUT`, `INVALID_RESPONSE`, `CONNECTION_LOST`, `DISCONNECTED` or `NOT_CONNECTED`. `tag` names the tag that failed.
-- feat: Added `disconnect()`. It closes the connection and stops reconnecting, rejects pending reads and writes right away with an `S7Error` whose code is `DISCONNECTED`, emits `disconnected`, and resolves once the socket is closed. It's safe to call twice or while connecting, and `initiateConnection()` connects again afterwards.
+- feat: Added `disconnect()`. It closes the connection and stops reconnecting, rejects pending reads and writes right away with an `S7Error` whose code is `DISCONNECTED`, emits `disconnected`, and resolves once the socket is closed. It's safe to call twice or while connecting, and `connect()` connects again afterwards.
 - test: Added an automated test suite that runs against a simulated S7 PLC (`npm test`).
 - build: Updated the development tooling to TypeScript 6, ESLint 10 and Prettier 3.
 - build: `npm publish` runs the linter and the whole test suite first (`prepublishOnly`), and `npm run build` starts from an empty `lib/`.
@@ -28,6 +28,7 @@
 
 ## Breaking Changes
 
+- `initiateConnection()` has been renamed to `connect()`. It works the same way.
 - The package is now ESM-only (`"type": "module"`), compiled to ES2022 instead of ES5 CommonJS. CommonJS projects can still use `require('nodes7comm')` thanks to Node's support for `require()` of ES modules.
 - Requires Node.js `^20.19.0 || >=22.12.0` (declared in `engines`).
 - Added an `exports` map: only the package root can be imported. Deep imports such as `nodes7comm/lib/...` no longer work.

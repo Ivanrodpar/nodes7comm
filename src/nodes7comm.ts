@@ -89,7 +89,7 @@ export class NodeS7Comm extends EventEmitter {
     private connectTimeout: NodeJS.Timeout | undefined; // setTimeout function
     private PDUTimeout: NodeJS.Timeout | undefined; // setTimeout function
     private reconnectTimer: NodeJS.Timeout | undefined; // setTimeout function
-    private disconnectRequested: boolean = false; // Set by disconnect(): blocks every reconnection until initiateConnection() is called again
+    private disconnectRequested: boolean = false; // Set by disconnect(): blocks every reconnection until connect() is called again
     private disconnecting: Promise<void> | undefined; // While disconnect() waits for the socket to close
     private abortConnecting: ((reason: Error) => void) | undefined; // Rejects the connection step in progress (TCP, ISO or PDU); used by disconnect(). Calling it on a step that already settled does nothing
 
@@ -2290,7 +2290,7 @@ export class NodeS7Comm extends EventEmitter {
         }
     }
 
-    public initiateConnection(): void {
+    public connect(): void {
         this.disconnectRequested = false;
         if (this.disconnecting) {
             // disconnect() is still closing the old socket: open the new connection once it's closed,
@@ -2305,7 +2305,7 @@ export class NodeS7Comm extends EventEmitter {
      * Closes the connection and stops reconnecting, even with `autoReconnect`. Pending reads and writes reject
      * right away with an `Error('Disconnected')`. Resolves once the socket is closed, so a new connection to a PLC
      * with few free connections (like an S7-1200) can be opened safely afterwards. Calling it again does nothing.
-     * Call `initiateConnection()` to connect again.
+     * Call `connect()` to connect again.
      */
     public async disconnect(): Promise<void> {
         const alreadyDisconnected = this.disconnectRequested;

@@ -18,7 +18,7 @@ npm install nodes7comm
 
 ## Methods
 
-- [initiateConnection](#initiateConnecton)
+- [connect](#connect)
 - [readTags](#readTags)
 - [writeTags](#writeTags)
 - [addTranslationTags](#addTranslationTags)
@@ -28,7 +28,7 @@ npm install nodes7comm
 - [removeTags](#removeTags)
 - [disconnect](#disconnect)
 
-<a  name="initiateConnection">initiateConnecton</a>
+<a name="connect">connect</a>
 
 ```ts
 
@@ -39,7 +39,7 @@ const options: Nodes7CommConfig = {
 };
 
 const s7Client = new NodeS7Comm(options);
-s7Client.initiateConnection();
+s7Client.connect();
 
 s7Client.on('error', (err) => {
 	// Connection errors. Without this listener they are written to stderr and the process keeps running
@@ -218,7 +218,7 @@ s7Client.readAllTags().then((values) => {
 await s7Client.disconnect();
 
 // Safe to open a new connection now, even on PLCs with few free connections
-s7Client.initiateConnection();
+s7Client.connect();
 
 ```
 
