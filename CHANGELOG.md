@@ -1,4 +1,4 @@
-### Unreleased
+### v3.0.0
 
 - feat: Added the `reconnectDelay` option: milliseconds to wait before retrying a failed connection attempt (default 2000).
 - feat: Typed results. `readTags` resolves to `Record<tag, S7Value>` with the keys taken from its arguments, and accepts the value type when you know it: `readTags<number>('DB1,INT0')`. `readAllTags` and `writeTags` are typed too, and `once`, `off`, `addListener`, `removeListener` and the `prepend*` methods know the event names and listener signatures, like `on` already did. `S7Value` and `NodeS7CommEvents` are exported.
